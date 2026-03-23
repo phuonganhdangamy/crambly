@@ -25,11 +25,11 @@ from agents.delivery_agent import build_pulse
 from agents.digital_twin_agent import apply_quiz_result
 from agents.ingestion_agent import run_ingestion
 from agents.study_dna_agent import run_study_dna
+from agents.expressive_media_agent import run_meme_pipeline
 from agents.transformation_agent import run_transform
 from config import Settings, get_settings
 from db import ensure_demo_user, supabase_client
 from elevenlabs_client import synthesize_speech
-from gemini_client import extract_json_blob, generate_text as gemini_generate_text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -78,6 +78,9 @@ class TtsBody(BaseModel):
 class MemeBody(BaseModel):
     concept_title: str
     summary: str
+    reimagine: bool = False
+    # When reimagine=True, pass the prior brief to skip Step 1 and reuse fallback_prompt.
+    brief: dict[str, Any] | None = None
 
 
 @app.on_event("startup")
@@ -290,19 +293,16 @@ def api_tts(body: TtsBody, settings: Settings = Depends(get_settings)) -> dict[s
 
 @app.post("/api/meme")
 def api_meme(body: MemeBody, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
-    _ = settings
-    prompt = f"""Create a short, student-safe 'meme recap' for this concept.
-Return JSON with keys: headline (string), caption (string), tone (string).
-Concept: {body.concept_title}
-Summary: {body.summary}
-JSON only."""
     try:
-        raw = gemini_generate_text(prompt, temperature=0.9)
-        data = extract_json_blob(raw)
-        if not isinstance(data, dict):
-            raise ValueError("not json object")
-        return {"meme": data}
+        return run_meme_pipeline(
+            concept_title=body.concept_title,
+            summary=body.summary,
+            force_image=body.reimagine,
+            prior_brief=body.brief,
+            settings=settings,
+        )
     except Exception as e:  # noqa: BLE001
+        logger.exception("meme pipeline failed")
         raise HTTPException(500, str(e)) from e
 
 

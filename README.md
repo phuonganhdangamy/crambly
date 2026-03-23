@@ -247,6 +247,147 @@ Step 5 — Digital Twin improves over time
 
 ---
 
+## Local setup (run the repo)
+
+Commands below use **PowerShell** on **Windows**. Adjust paths if your project lives elsewhere.
+
+### Prerequisites
+
+- **Node.js 18+** and **npm** (for Next.js and Expo)
+- **Python 3.11+** (3.12 is fine)
+- A **Supabase** project: run the SQL migrations, create Storage bucket **`uploads`** (see `.env.example`)
+- API keys in **`.env`** at the **repo root** (copy from `.env.example`)
+
+### 1. Clone and enter the repo
+
+```powershell
+cd c:\Users\phuon\Desktop\crambly
+```
+
+If you cloned elsewhere:
+
+```powershell
+cd path\to\crambly
+```
+
+### 2. Environment variables
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env: GEMINI_API_KEY, SUPABASE_*, ELEVENLABS_* (if using TTS), NEXT_PUBLIC_API_URL, etc.
+```
+
+Important for the desktop app:
+
+```env
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+```
+
+For **no Redis** (recommended if you are not running Redis):
+
+```env
+REDIS_URL=
+```
+
+### 3. Supabase (one-time)
+
+1. In the Supabase **SQL Editor**, run:
+   - `supabase/migrations/20250322000000_init.sql`
+   - `supabase/migrations/20250323000000_storage_uploads_bucket.sql` (creates the **`uploads`** bucket)
+   - `supabase/migrations/20250324000000_concepts_embedding_3072_optional.sql` (only if you use 3072-dim embeddings)
+   - `supabase/migrations/20250325000000_concepts_stem_visual.sql` (**`graph_data`**, **`has_math`** on concepts — required for the STEM study graph)
+2. **Storage →** confirm bucket **`uploads`** exists (or match `SUPABASE_UPLOAD_BUCKET` in `.env`).
+
+### 4. Backend (FastAPI)
+
+Use a **virtual environment** so `pip` does not fight other global packages.
+
+```powershell
+cd c:\Users\phuon\Desktop\crambly\backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+If activation is blocked:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Install dependencies and start the API:
+
+```powershell
+pip install -r requirements.txt
+py -m uvicorn main:app --reload
+```
+
+Leave this terminal open. API: **http://127.0.0.1:8000** — interactive docs: **http://127.0.0.1:8000/docs**
+
+> **`uvicorn` not recognized?** Use `py -m uvicorn main:app --reload` (same as above).
+
+Deactivate the venv later:
+
+```powershell
+deactivate
+```
+
+### 5. Desktop web (Next.js)
+
+New terminal:
+
+```powershell
+cd c:\Users\phuon\Desktop\crambly
+npm install
+npm run dev:web
+```
+
+Or from the `web` folder:
+
+```powershell
+cd c:\Users\phuon\Desktop\crambly\web
+npm install
+npm run dev
+```
+
+Open **http://localhost:3000**.
+
+### 6. Mobile (Expo)
+
+Expo lives in **`mobile/`** with its **own** `node_modules` (not the root workspace).
+
+```powershell
+cd c:\Users\phuon\Desktop\crambly\mobile
+npm install
+npx expo start
+```
+
+From the repo root you can also run:
+
+```powershell
+cd c:\Users\phuon\Desktop\crambly
+npm run dev:mobile
+```
+
+Then press **`w`** for **web**, or scan the QR code with **Expo Go** on your phone.
+
+- **Expo Web on the same PC as the API:** set `EXPO_PUBLIC_API_URL=http://localhost:8000` (or `http://127.0.0.1:8000`) in `.env` / Expo env.
+- **Physical iPhone:** PC and phone on the same Wi‑Fi; set `EXPO_PUBLIC_API_URL=http://YOUR_PC_LAN_IP:8000` (not `localhost`).
+
+### Optional: Redis (Docker)
+
+Redis is **optional** for this MVP; leave `REDIS_URL=` empty unless you run a queue.
+
+If Docker works on your machine:
+
+```powershell
+cd c:\Users\phuon\Desktop\crambly
+docker compose up -d
+```
+
+Then in `.env`: `REDIS_URL=redis://localhost:6379/0` and restart the backend.
+
+---
+
 ## MVP Scope (Submission)
 
 **Must-have:**

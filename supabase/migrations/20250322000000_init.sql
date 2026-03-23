@@ -38,7 +38,9 @@ create table if not exists public.concepts (
   title text not null,
   summary text not null,
   exam_importance int not null check (exam_importance between 1 and 5),
-  embedding vector(768)
+  embedding vector(768),
+  graph_data jsonb,
+  has_math boolean not null default false
 );
 
 create index if not exists concepts_upload_id_idx on public.concepts (upload_id);

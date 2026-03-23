@@ -25,3 +25,9 @@ body {
     text-wrap: balance;
   }
 }
+
+/* KaTeX on dark study deck */
+.katex {
+  color: #e2e8f0;
+}
+

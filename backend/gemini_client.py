@@ -9,9 +9,11 @@ import json
 import logging
 import re
 import time
+import base64
 from typing import Any
 
 import google.generativeai as genai
+import httpx
 
 from config import get_settings
 
@@ -120,28 +122,223 @@ def generate_multimodal(
     raise RuntimeError("Gemini multimodal failed after retries") from last_err
 
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Batch embeddings for pgvector storage."""
-    configure_gemini()
+_working_embed_model: str | None = None
+
+
+def _normalize_embed_model_id(mid: str) -> str:
+    mid = mid.strip()
+    if not mid:
+        return mid
+    if mid.startswith("models/"):
+        return mid
+    return f"models/{mid}" if "/" not in mid else mid
+
+
+def _embedding_model_candidates() -> list[str]:
+    """Ordered list. text-embedding-004 retired Jan 2026 — not included."""
     s = get_settings()
+    primary = s.gemini_embedding_model.strip()
+    if not primary:
+        primary = "models/gemini-embedding-001"
+    else:
+        primary = _normalize_embed_model_id(primary)
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in (primary, "models/gemini-embedding-001", "models/gemini-embedding-2-preview"):
+        if m not in seen:
+            out.append(m)
+            seen.add(m)
+    return out
+
+
+def _embedding_target_dim() -> int:
+    d = int(get_settings().gemini_embedding_output_dimensionality)
+    return max(0, min(d, 3072))
+
+
+def _truncate_embedding(vec: list[float], dim: int) -> list[float]:
+    if dim <= 0:
+        return vec
+    if len(vec) > dim:
+        return vec[:dim]
+    return vec
+
+
+def _embed_one_call(model: str, text: str) -> list[float]:
+    """Matryoshka: prefer output_dimensionality for gemini-embedding-* (matches pgvector column)."""
+    dim = _embedding_target_dim()
+    is_gemini_embed = "gemini-embedding" in model.lower()
+
+    attempts: list[dict[str, object]] = []
+    if is_gemini_embed and dim > 0:
+        attempts.append(
+            {"model": model, "content": text, "output_dimensionality": dim},
+        )
+        attempts.append(
+            {
+                "model": model,
+                "content": text,
+                "output_dimensionality": dim,
+                "task_type": "retrieval_document",
+            },
+        )
+    attempts.append({"model": model, "content": text, "task_type": "retrieval_document"})
+    attempts.append({"model": model, "content": text})
+
+    last_err: Exception | None = None
+    for kwargs in attempts:
+        try:
+            res = genai.embed_content(**kwargs)  # type: ignore[arg-type]
+            vec = res.get("embedding")
+            if not vec:
+                continue
+            out = list(vec)
+            out = _truncate_embedding(out, dim)
+            if dim > 0 and len(out) != dim:
+                last_err = RuntimeError(
+                    f"Embedding length {len(out)} does not match target dimension {dim}",
+                )
+                continue
+            return out
+        except TypeError as e:
+            last_err = e
+            continue
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            continue
+
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError("Empty embedding from Gemini")
+
+
+def _embed_one(text: str) -> list[float]:
+    """Try candidate models until one works; cache the winner for the rest of the process."""
+    global _working_embed_model
+    candidates = _embedding_model_candidates()
+    if _working_embed_model and _working_embed_model in candidates:
+        candidates = [_working_embed_model] + [c for c in candidates if c != _working_embed_model]
+    last_err: Exception | None = None
+    for model in candidates:
+        try:
+            vec = _embed_one_call(model, text)
+            _working_embed_model = model
+            return vec
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            logger.debug("embed_content failed for %s: %s", model, e)
+    assert last_err is not None
+    raise last_err
+
+
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Batch embeddings for pgvector storage (_embed_one already tries several model ids)."""
+    configure_gemini()
+    last_err: Exception | None = None
+    for attempt in range(2):
+        try:
+            return [_embed_one(t) for t in texts]
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            logger.exception("Gemini embed batch attempt %s failed", attempt)
+            if attempt < 1:
+                _sleep_backoff(attempt)
+    raise RuntimeError("Gemini embed failed after retries") from last_err
+
+
+def _normalize_generate_model_id(model_id: str) -> str:
+    mid = model_id.strip()
+    if mid.startswith("models/"):
+        return mid[7:]
+    return mid
+
+
+def generate_image_bytes_rest(
+    prompt: str,
+    *,
+    model_id: str | None = None,
+    timeout_s: float = 120.0,
+) -> tuple[bytes, str]:
+    """
+    Image output via Generative Language REST API (responseModalities: IMAGE).
+    The deprecated google-generativeai client does not expose response modalities; we use HTTP here.
+    """
+    s = get_settings()
+    key = (s.gemini_api_key or "").strip()
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY is required for image generation")
+
+    mid = _normalize_generate_model_id(model_id or s.gemini_meme_image_model)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{mid}:generateContent"
+    body: dict[str, Any] = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": prompt}],
+            }
+        ],
+        "generationConfig": {
+            "responseModalities": ["IMAGE", "TEXT"],
+        },
+    }
     last_err: Exception | None = None
     for attempt in range(_MAX_ATTEMPTS):
         try:
-            out: list[list[float]] = []
-            for t in texts:
-                res = genai.embed_content(
-                    model=s.gemini_embedding_model,
-                    content=t,
-                    task_type="retrieval_document",
-                )
-                vec = res.get("embedding")
-                if not vec:
-                    raise RuntimeError("Empty embedding from Gemini")
-                out.append(list(vec))
-            return out
+            r = httpx.post(
+                url,
+                params={"key": key},
+                json=body,
+                timeout=timeout_s,
+            )
+            r.raise_for_status()
+            payload = r.json()
+            img = _extract_inline_image_from_rest_response(payload)
+            if img:
+                return img
+            raise RuntimeError("Model response contained no image data (NO_IMAGE or text-only)")
         except Exception as e:  # noqa: BLE001
             last_err = e
-            logger.exception("Gemini embed attempt %s failed", attempt)
+            logger.exception("Gemini image REST attempt %s failed", attempt)
             if attempt < _MAX_ATTEMPTS - 1:
                 _sleep_backoff(attempt)
-    raise RuntimeError("Gemini embed failed after retries") from last_err
+    raise RuntimeError("Gemini image generation failed after retries") from last_err
+
+
+def _extract_inline_image_from_rest_response(payload: dict[str, Any]) -> tuple[bytes, str] | None:
+    """Return (raw_bytes, mime_type) from first inlineData image part, or None."""
+    cands = payload.get("candidates")
+    if not isinstance(cands, list) or not cands:
+        return None
+    content = cands[0].get("content") or {}
+    parts = content.get("parts")
+    if not isinstance(parts, list):
+        return None
+    for p in parts:
+        if not isinstance(p, dict):
+            continue
+        inline = p.get("inlineData") or p.get("inline_data")
+        if not isinstance(inline, dict):
+            continue
+        mime = str(inline.get("mimeType") or inline.get("mime_type") or "image/png")
+        b64 = inline.get("data")
+        if not b64:
+            continue
+        try:
+            raw = base64.b64decode(b64, validate=True)
+        except Exception:  # noqa: BLE001
+            raw = base64.b64decode(b64)
+        if raw:
+            return raw, mime
+    return None
+
+
+def embed_texts_optional(texts: list[str]) -> list[list[float]] | None:
+    """
+    Like embed_texts but returns None if no embedding model works.
+    Callers can persist concepts without vectors so ingestion still succeeds.
+    """
+    try:
+        return embed_texts(texts)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("All embedding models failed — continuing without vectors: %s", e)
+        return None

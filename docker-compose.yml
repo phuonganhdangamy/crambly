@@ -1,3 +1,4 @@
+# OPTIONAL — only if you use Docker. Safe to ignore if Docker Desktop does not work.
 # Free local Redis for Crambly (optional queue). Official image: https://hub.docker.com/_/redis
 #
 # Start:  docker compose up -d

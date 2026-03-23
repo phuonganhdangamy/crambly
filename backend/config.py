@@ -31,8 +31,15 @@ class Settings(BaseSettings):
     # Latest preview Pro (multimodal: PDF/image/audio). Override with GEMINI_MODEL in .env.
     # If 404, pick another id from https://ai.google.dev/gemini-api/docs/models for your key.
     gemini_model: str = "gemini-3.1-pro-preview"
-    # Matches pgvector(768) in supabase migration (embedding-001 = 768 dims).
-    gemini_embedding_model: str = "models/embedding-001"
+    # Meme fallback / “AI Reimagine” image generation (REST generateContent + responseModalities).
+    gemini_meme_image_model: str = "gemini-3.1-flash-image-preview"
+    # Imgflip caption API (optional). Without these, meme flow uses Gemini image for all outputs.
+    imgflip_username: str = ""
+    imgflip_password: str = ""
+    # text-embedding-004 was retired Jan 2026; use gemini-embedding-001 (+ optional output_dimensionality).
+    gemini_embedding_model: str = "models/gemini-embedding-001"
+    # Must match pgvector(N) on concepts.embedding (768 default). Use 3072 after optional SQL migration.
+    gemini_embedding_output_dimensionality: int = 768
 
 
 @lru_cache

@@ -14,16 +14,38 @@ from uuid import uuid4
 
 from config import get_settings
 from db import ensure_demo_user, supabase_client, vector_to_pg
-from gemini_client import embed_texts, extract_json_blob, generate_multimodal
+from gemini_client import (
+    embed_texts_optional,
+    extract_json_blob,
+    generate_multimodal,
+    generate_text,
+)
 from redis_util import enqueue_ingestion
 
 logger = logging.getLogger(__name__)
 
 INGESTION_PROMPT = """You are an academic content parser. Extract all key concepts from the following
-content. For each concept return: title, 2-sentence summary, and exam_importance
-score from 1 (low) to 5 (critical). Return as JSON array with objects:
-{"title": string, "summary": string, "exam_importance": number}.
+content. For each concept return: title, 2-sentence summary, exam_importance
+score from 1 (low) to 5 (critical), and has_math (boolean) if the concept involves equations,
+symbols, or quantitative STEM notation.
+Return as JSON array with objects:
+{"title": string, "summary": string, "exam_importance": number, "has_math": boolean}.
 Do not include markdown. Only the JSON array."""
+
+GRAPH_PROMPT = """You map relationships between course concepts for an interactive graph (max 10 nodes).
+
+Return JSON ONLY:
+{{"nodes": [{{"id": "<UUID>", "label": "short label"}}], "edges": [{{"source": "<UUID>", "target": "<UUID>", "relationship": "short verb phrase"}}]}}
+
+Rules:
+- Every node "id" MUST be copied exactly from the UUIDs listed below (no invented ids).
+- At most 10 nodes and 20 edges.
+- Prefer pedagogically important links (prerequisite, enables, contrasts, derives from).
+
+CONCEPTS (id | title | summary snippet):
+{concept_lines}
+
+JSON only, no markdown."""
 
 
 def _guess_mime(file_name: str, declared: str | None) -> str:
@@ -47,8 +69,79 @@ def _normalize_concepts(raw: Any) -> list[dict[str, Any]]:
         imp = int(item.get("exam_importance", 3))
         imp = max(1, min(5, imp))
         if title and summary:
-            out.append({"title": title, "summary": summary, "exam_importance": imp})
+            hm = item.get("has_math")
+            has_math = bool(hm) if hm is not None else False
+            out.append(
+                {
+                    "title": title,
+                    "summary": summary,
+                    "exam_importance": imp,
+                    "has_math": has_math,
+                }
+            )
     return out
+
+
+def _build_concept_graph(inserted_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Gemini builds a small relationship graph; node ids must be real concept UUIDs."""
+    if not inserted_rows:
+        return None
+    if len(inserted_rows) == 1:
+        r0 = inserted_rows[0]
+        return {
+            "nodes": [{"id": str(r0["id"]), "label": str(r0.get("title", "Concept"))[:80]}],
+            "edges": [],
+        }
+    lines = "\n".join(
+        f"- {row['id']} | {row.get('title', '')} | {str(row.get('summary', ''))[:200]}"
+        for row in inserted_rows[:12]
+    )
+    prompt = GRAPH_PROMPT.format(concept_lines=lines)
+    try:
+        raw = generate_text(
+            prompt + "\n\nRespond with valid JSON only. No markdown fences.",
+            temperature=0.2,
+        )
+        data = extract_json_blob(raw)
+        if not isinstance(data, dict):
+            return None
+        allowed = {str(r["id"]) for r in inserted_rows}
+        raw_nodes = data.get("nodes") or []
+        nodes: list[dict[str, str]] = []
+        for n in raw_nodes:
+            if not isinstance(n, dict):
+                continue
+            nid = str(n.get("id", "")).strip()
+            if nid in allowed:
+                nodes.append(
+                    {
+                        "id": nid,
+                        "label": str(n.get("label", ""))[:120] or nid[:8],
+                    }
+                )
+        nodes = nodes[:10]
+        node_ids = {n["id"] for n in nodes}
+        raw_edges = data.get("edges") or []
+        edges: list[dict[str, str]] = []
+        for e in raw_edges:
+            if not isinstance(e, dict):
+                continue
+            s, t = str(e.get("source", "")), str(e.get("target", ""))
+            if s in node_ids and t in node_ids and s != t:
+                edges.append(
+                    {
+                        "source": s,
+                        "target": t,
+                        "relationship": str(e.get("relationship", "relates to"))[:80],
+                    }
+                )
+        edges = edges[:20]
+        if not nodes:
+            return None
+        return {"nodes": nodes, "edges": edges}
+    except Exception:  # noqa: BLE001
+        logger.warning("Concept graph generation failed", exc_info=True)
+        return None
 
 
 def run_ingestion(
@@ -126,22 +219,45 @@ def run_ingestion(
         raise RuntimeError("No concepts extracted")
 
     embed_inputs = [f"{c['title']}\n{c['summary']}" for c in concepts]
-    embeddings = embed_texts(embed_inputs)
+    embeddings = embed_texts_optional(embed_inputs)
 
-    for c, emb in zip(concepts, embeddings, strict=True):
+    inserted_rows: list[dict[str, Any]] = []
+    for i, c in enumerate(concepts):
+        emb = embeddings[i] if embeddings is not None else None
         base = {
             "upload_id": upload_id,
             "title": c["title"],
             "summary": c["summary"],
             "exam_importance": c["exam_importance"],
+            "has_math": bool(c.get("has_math", False)),
         }
+        row_out: dict[str, Any] = dict(base)
         try:
-            sb.table("concepts").insert({**base, "embedding": emb}).execute()
+            if emb is None:
+                ins = sb.table("concepts").insert(base).execute()
+            else:
+                try:
+                    ins = sb.table("concepts").insert({**base, "embedding": emb}).execute()
+                except Exception:  # noqa: BLE001
+                    try:
+                        ins = sb.table("concepts").insert(
+                            {**base, "embedding": vector_to_pg(emb)}
+                        ).execute()
+                    except Exception:  # noqa: BLE001
+                        ins = sb.table("concepts").insert(base).execute()
+            if ins.data:
+                row_out["id"] = ins.data[0]["id"]
+                inserted_rows.append(row_out)
         except Exception:  # noqa: BLE001
-            try:
-                sb.table("concepts").insert({**base, "embedding": vector_to_pg(emb)}).execute()
-            except Exception:  # noqa: BLE001
-                sb.table("concepts").insert(base).execute()
+            logger.exception("Concept insert failed")
+            raise
+
+    graph = _build_concept_graph(inserted_rows)
+    if graph:
+        try:
+            sb.table("concepts").update({"graph_data": graph}).eq("upload_id", upload_id).execute()
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not persist graph_data on concepts", exc_info=True)
 
     sb.table("uploads").update({"status": "ready"}).eq("id", upload_id).execute()
 

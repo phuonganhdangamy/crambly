@@ -70,7 +70,7 @@ def run_transform(
 
     concepts = (
         sb.table("concepts")
-        .select("id,title,summary,exam_importance")
+        .select("id,title,summary,exam_importance,has_math,graph_data")
         .eq("upload_id", upload_id)
         .execute()
     )
@@ -97,7 +97,8 @@ def run_transform(
     dial = max(0.0, min(1.0, dial))
 
     bundle = "\n\n".join(
-        f"### {r['title']}\n{r['summary']} (exam_importance={r['exam_importance']})"
+        f"### {r['title']}\n{r['summary']} (exam_importance={r['exam_importance']}, "
+        f"has_math={bool(r.get('has_math'))}, concept_id={r['id']})"
         for r in rows
     )
 
@@ -109,14 +110,34 @@ def run_transform(
 
 Complexity dial: {dial:.2f} where 0 means expert-level density and 1 means ELI5.
 
+STEM / active learning requirements:
+- Prioritize relationships (cause-effect, prerequisite, structure), not wall-of-text re-reading.
+- Every mathematical expression MUST use LaTeX inside delimiters: inline $...$ or display $$...$$ so a math renderer can show it.
+- For each major section, include a worked_example with a realistic STEM scenario, ordered step strings, and plain_english meaning.
+- If a section covers equations (or the source concept has has_math=true), set has_math true and add formula_annotation with "formula" (LaTeX) and "terms" array of {{symbol, meaning}} for the main symbols in that formula. Otherwise formula_annotation may be null.
+
 CONTENT:
 {bundle}
 
 Return JSON with keys:
-summary (string, overall),
+summary (string, overall; use $ / $$ for math),
 concept_map (string, text hierarchy),
 key_terms (string array),
-sections (array of {{ "header": string, "body": string }}) — at least 3 sections.
+sections (array of objects, at least 3), each object:
+{{
+  "header": string,
+  "body": string (use $ / $$ for ALL math),
+  "worked_example": {{
+    "scenario": string,
+    "steps": string[],
+    "plain_english": string
+  }},
+  "has_math": boolean,
+  "formula_annotation": null OR {{
+    "formula": string,
+    "terms": [{{"symbol": string, "meaning": string}}]
+  }}
+}}
 JSON only."""
 
     raw = generate_text(
@@ -127,11 +148,105 @@ JSON only."""
     if not isinstance(data, dict):
         raise RuntimeError("Transform output was not a JSON object")
 
+    raw_sections = list(data.get("sections") or [])
+    sections_norm: list[dict[str, Any]] = []
+    for s in raw_sections:
+        if not isinstance(s, dict):
+            continue
+        body = str(s.get("body", ""))
+        body = _ensure_latex_delimiters(body)
+        we = s.get("worked_example")
+        if not isinstance(we, dict):
+            we = {
+                "scenario": "",
+                "steps": [],
+                "plain_english": "",
+            }
+        fa = s.get("formula_annotation")
+        if fa is not None and not isinstance(fa, dict):
+            fa = None
+        elif isinstance(fa, dict):
+            terms_raw = fa.get("terms") or []
+            terms_list: list[dict[str, str]] = []
+            for t in terms_raw:
+                if isinstance(t, dict):
+                    terms_list.append(
+                        {
+                            "symbol": str(t.get("symbol", "")),
+                            "meaning": str(t.get("meaning", "")),
+                        }
+                    )
+            fa = {
+                "formula": str(fa.get("formula", "")),
+                "terms": terms_list,
+            }
+            if not fa["formula"] and not fa["terms"]:
+                fa = None
+        sections_norm.append(
+            {
+                "header": str(s.get("header", "")),
+                "body": body,
+                "worked_example": {
+                    "scenario": str(we.get("scenario", "")),
+                    "steps": [str(x) for x in (we.get("steps") or []) if str(x).strip()],
+                    "plain_english": str(we.get("plain_english", "")),
+                },
+                "has_math": bool(s.get("has_math", False)),
+                "formula_annotation": fa,
+            }
+        )
+
+    summary = _ensure_latex_delimiters(str(data.get("summary", "")))
+    concept_graph: dict[str, Any] | None = None
+    for r in rows:
+        gd = r.get("graph_data")
+        if isinstance(gd, dict) and gd.get("nodes"):
+            concept_graph = gd
+            break
+
+    concepts_catalog = [
+        {
+            "id": str(r["id"]),
+            "title": r["title"],
+            "summary": r["summary"],
+            "has_math": bool(r.get("has_math")),
+        }
+        for r in rows
+    ]
+
     return {
         "mode": mode_key,
-        "summary": str(data.get("summary", "")),
+        "summary": summary,
         "concept_map": str(data.get("concept_map", "")),
         "key_terms": list(data.get("key_terms") or []),
-        "sections": list(data.get("sections") or []),
+        "sections": sections_norm,
         "complexity_dial": dial,
+        "concept_graph": concept_graph,
+        "concepts_catalog": concepts_catalog,
     }
+
+
+def _ensure_latex_delimiters(text: str) -> str:
+    """
+    If the model returned raw LaTeX without $...$, run a tight follow-up pass.
+    Skips when delimiters already present to save latency.
+    """
+    if not text.strip():
+        return text
+    if "$" in text:
+        return text
+    if "\\(" in text or "\\[" in text:
+        return text
+    if not any(c in text for c in "=^_\\{}\\frac\\sum\\int\\alpha\\beta\\gamma\\pi"):
+        return text
+    try:
+        raw = generate_text(
+            "Wrap ONLY the mathematical expressions in this fragment with inline $...$ "
+            "or display $$...$$. Do not change wording or add commentary. Output the fragment only.\n\n"
+            + text[:6000],
+            temperature=0.1,
+        )
+        out = (raw or "").strip()
+        return out if out else text
+    except Exception:  # noqa: BLE001
+        return text
