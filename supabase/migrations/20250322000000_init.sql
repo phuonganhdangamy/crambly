@@ -24,6 +24,7 @@ create table if not exists public.uploads (
   status text not null default 'processing' check (status in ('processing', 'ready', 'error')),
   learner_mode text,
   complexity_dial double precision,
+  meme_recap jsonb,
   created_at timestamptz not null default now()
 );
 

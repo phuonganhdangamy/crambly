@@ -9,7 +9,7 @@ these same functions later (tool boundaries already align 1:1 with routes).
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -81,6 +81,21 @@ class MemeBody(BaseModel):
     reimagine: bool = False
     # When reimagine=True, pass the prior brief to skip Step 1 and reuse fallback_prompt.
     brief: dict[str, Any] | None = None
+
+
+class MemeBriefStored(BaseModel):
+    template: str
+    top_text: str = ""
+    bottom_text: str = ""
+    fallback_prompt: str = ""
+
+
+class MemeRecapStoredBody(BaseModel):
+    brief: MemeBriefStored
+    source: Literal["imgflip", "gemini"]
+    image_url: str | None = None
+    image_base64: str | None = None
+    mime: str | None = None
 
 
 @app.on_event("startup")
@@ -304,6 +319,53 @@ def api_meme(body: MemeBody, settings: Settings = Depends(get_settings)) -> dict
     except Exception as e:  # noqa: BLE001
         logger.exception("meme pipeline failed")
         raise HTTPException(500, str(e)) from e
+
+
+@app.get("/api/meme/stored/{upload_id}")
+def api_meme_stored_get(
+    upload_id: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    user_id = str(settings.crambly_demo_user_id)
+    if not upload_id.strip():
+        raise HTTPException(400, "upload_id required")
+    ensure_demo_user()
+    sb = supabase_client()
+    res = (
+        sb.table("uploads")
+        .select("meme_recap")
+        .eq("id", upload_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(404, "upload not found")
+    return {"meme_recap": res.data[0].get("meme_recap")}
+
+
+@app.put("/api/meme/stored/{upload_id}")
+def api_meme_stored_put(
+    upload_id: str,
+    body: MemeRecapStoredBody,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    user_id = str(settings.crambly_demo_user_id)
+    if not upload_id.strip():
+        raise HTTPException(400, "upload_id required")
+    ensure_demo_user()
+    sb = supabase_client()
+    payload = body.model_dump(exclude_none=True)
+    up = (
+        sb.table("uploads")
+        .update({"meme_recap": payload})
+        .eq("id", upload_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not up.data:
+        raise HTTPException(404, "upload not found")
+    return {"ok": True}
 
 
 @app.get("/api/audio-clips/{uid}")

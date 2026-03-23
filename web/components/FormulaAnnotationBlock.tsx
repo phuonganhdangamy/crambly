@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { BlockMath } from "react-katex";
+import { stripOuterLatexDelimiters } from "@/lib/latexNormalize";
 import "katex/dist/katex.min.css";
 
 export type FormulaTerm = { symbol: string; meaning: string };
@@ -14,6 +15,11 @@ export function FormulaAnnotationBlock({
   terms: FormulaTerm[];
 }) {
   const [active, setActive] = useState<string | null>(null);
+
+  const katexFormula = useMemo(() => {
+    const inner = stripOuterLatexDelimiters(formula);
+    return inner.trim() ? inner : formula.trim();
+  }, [formula]);
 
   const annotatedParts = useMemo(() => {
     if (!formula.trim()) return [];
@@ -48,7 +54,7 @@ export function FormulaAnnotationBlock({
     <div className="mt-4 rounded-xl border border-cyan-500/25 bg-slate-950/80 p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Formula</p>
       <div className="mt-2 overflow-x-auto text-slate-100 [&_.katex]:text-slate-100">
-        <BlockMath math={formula} errorColor="#f87171" />
+        <BlockMath math={katexFormula} errorColor="#f87171" />
       </div>
       {terms.length > 0 && annotatedParts.length > 0 && (
         <div className="mt-3">

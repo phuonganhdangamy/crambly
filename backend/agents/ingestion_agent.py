@@ -101,6 +101,10 @@ def _build_concept_graph(inserted_rows: list[dict[str, Any]]) -> dict[str, Any] 
         raw = generate_text(
             prompt + "\n\nRespond with valid JSON only. No markdown fences.",
             temperature=0.2,
+            # This graph is optional; cap attempts so /api/upload doesn't hang
+            # when Gemini is slow or rate-limited.
+            max_attempts=2,
+            max_output_tokens=512,
         )
         data = extract_json_blob(raw)
         if not isinstance(data, dict):

@@ -153,8 +153,8 @@ JSON only."""
     for s in raw_sections:
         if not isinstance(s, dict):
             continue
-        body = str(s.get("body", ""))
-        body = _ensure_latex_delimiters(body)
+        header = _ensure_latex_delimiters(str(s.get("header", "")))
+        body = _ensure_latex_delimiters(str(s.get("body", "")))
         we = s.get("worked_example")
         if not isinstance(we, dict):
             we = {
@@ -162,6 +162,10 @@ JSON only."""
                 "steps": [],
                 "plain_english": "",
             }
+        scenario = _ensure_latex_delimiters(str(we.get("scenario", "")))
+        steps_raw = [str(x) for x in (we.get("steps") or []) if str(x).strip()]
+        steps_norm = [_ensure_latex_delimiters(st) for st in steps_raw]
+        plain_english = _ensure_latex_delimiters(str(we.get("plain_english", "")))
         fa = s.get("formula_annotation")
         if fa is not None and not isinstance(fa, dict):
             fa = None
@@ -176,20 +180,21 @@ JSON only."""
                             "meaning": str(t.get("meaning", "")),
                         }
                     )
+            raw_formula = str(fa.get("formula", ""))
             fa = {
-                "formula": str(fa.get("formula", "")),
+                "formula": _normalize_formula_latex(raw_formula),
                 "terms": terms_list,
             }
             if not fa["formula"] and not fa["terms"]:
                 fa = None
         sections_norm.append(
             {
-                "header": str(s.get("header", "")),
+                "header": header,
                 "body": body,
                 "worked_example": {
-                    "scenario": str(we.get("scenario", "")),
-                    "steps": [str(x) for x in (we.get("steps") or []) if str(x).strip()],
-                    "plain_english": str(we.get("plain_english", "")),
+                    "scenario": scenario,
+                    "steps": steps_norm,
+                    "plain_english": plain_english,
                 },
                 "has_math": bool(s.get("has_math", False)),
                 "formula_annotation": fa,
@@ -197,6 +202,7 @@ JSON only."""
         )
 
     summary = _ensure_latex_delimiters(str(data.get("summary", "")))
+    concept_map = _ensure_latex_delimiters(str(data.get("concept_map", "")))
     concept_graph: dict[str, Any] | None = None
     for r in rows:
         gd = r.get("graph_data")
@@ -217,13 +223,36 @@ JSON only."""
     return {
         "mode": mode_key,
         "summary": summary,
-        "concept_map": str(data.get("concept_map", "")),
+        "concept_map": concept_map,
         "key_terms": list(data.get("key_terms") or []),
         "sections": sections_norm,
         "complexity_dial": dial,
         "concept_graph": concept_graph,
         "concepts_catalog": concepts_catalog,
     }
+
+
+def _normalize_formula_latex(formula: str) -> str:
+    """
+    KaTeX display mode expects the inner TeX only. Models often wrap with $$...$$ or \\[...\\].
+    Strip repeatedly so nested wrappers from the model still collapse.
+    """
+    t = formula.strip()
+    while True:
+        if len(t) >= 4 and t.startswith("$$") and t.endswith("$$"):
+            t = t[2:-2].strip()
+            continue
+        if len(t) >= 4 and t.startswith(r"\[") and t.endswith(r"\]"):
+            t = t[2:-2].strip()
+            continue
+        if len(t) >= 4 and t.startswith(r"\(") and t.endswith(r"\)"):
+            t = t[2:-2].strip()
+            continue
+        if len(t) >= 2 and t.startswith("$") and t.endswith("$") and not t.startswith("$$"):
+            t = t[1:-1].strip()
+            continue
+        break
+    return t
 
 
 def _ensure_latex_delimiters(text: str) -> str:

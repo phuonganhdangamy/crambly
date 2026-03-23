@@ -28,9 +28,16 @@ class Settings(BaseSettings):
     crambly_demo_user_email: str = "demo@crambly.app"
 
     total_semester_days: float = 120.0
-    # Latest preview Pro (multimodal: PDF/image/audio). Override with GEMINI_MODEL in .env.
-    # If 404, pick another id from https://ai.google.dev/gemini-api/docs/models for your key.
+    # Legacy single model id (kept for backwards-compatibility with older envs).
+    # New code uses:
+    # - `gemini_text_model` for fast text tasks (transform, meme briefs, etc.)
+    # - `gemini_ingestion_model` for multimodal ingestion (PDF/image/audio parsing)
     gemini_model: str = "gemini-3.1-pro-preview"
+
+    # Fast tier (lower latency + higher RPM) for text-only tasks.
+    gemini_text_model: str = "gemini-3.1-flash-lite-preview"
+    # Heavy tier for multimodal ingestion (PDF/image/audio parsing).
+    gemini_ingestion_model: str = "gemini-3.1-pro-preview"
     # Meme fallback / “AI Reimagine” image generation (REST generateContent + responseModalities).
     gemini_meme_image_model: str = "gemini-3.1-flash-image-preview"
     # Imgflip caption API (optional). Without these, meme flow uses Gemini image for all outputs.

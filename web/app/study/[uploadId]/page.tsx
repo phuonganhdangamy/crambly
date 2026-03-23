@@ -9,7 +9,15 @@ import { FormulaAnnotationBlock } from "@/components/FormulaAnnotationBlock";
 import { MathRichText } from "@/components/MathRichText";
 import { WorkedExampleCard } from "@/components/WorkedExampleCard";
 import type { ConceptCatalogItem, MemePipelineResponse, StudyTransformSection } from "@/lib/api";
-import { postAudioClipMeta, postMeme, postTransform, postTts } from "@/lib/api";
+import {
+  fetchMemeRecap,
+  parseStoredMemeRecap,
+  postAudioClipMeta,
+  postMeme,
+  postTransform,
+  postTts,
+  putMemeRecap,
+} from "@/lib/api";
 
 function readMode(): LearnerMode {
   if (typeof window === "undefined") return "adhd";
@@ -62,23 +70,45 @@ export default function StudyPage() {
   const uploadId = params.uploadId;
 
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [meme, setMeme] = useState<Record<string, string> | null>(null);
+  const [meme, setMeme] = useState<MemePipelineResponse | null>(null);
   const [busyAudio, setBusyAudio] = useState(false);
   const [busyMeme, setBusyMeme] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const [mode, setMode] = useState<LearnerMode>("adhd");
   const [dial, setDial] = useState<number | undefined>(undefined);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
 
   useEffect(() => {
     setMode(readMode());
     setDial(readDial());
+    setPrefsLoaded(true);
+  }, [uploadId]);
+
+  useEffect(() => {
+    if (!uploadId) return;
+    let cancelled = false;
+    void fetchMemeRecap(uploadId)
+      .then(({ meme_recap }) => {
+        const parsed = parseStoredMemeRecap(meme_recap);
+        if (!cancelled) setMeme(parsed);
+      })
+      .catch(() => {
+        if (!cancelled) setMeme(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [uploadId]);
 
   const q = useQuery({
     queryKey: ["transform", uploadId, mode, dial],
     queryFn: () => postTransform(uploadId, mode, dial),
-    enabled: Boolean(uploadId),
+    enabled: Boolean(uploadId) && prefsLoaded,
+    // Transforming is expensive (Gemini generation). Keep results "fresh" for a while so
+    // leaving/re-entering the study deck doesn't immediately trigger another full transform.
+    staleTime: 1000 * 60 * 10,
+    gcTime: 1000 * 60 * 30,
   });
 
   const sections = useMemo(() => normalizeSections(q.data?.sections), [q.data?.sections]);
@@ -127,6 +157,7 @@ export default function StudyPage() {
         priorBrief: reimagine ? meme?.brief ?? null : null,
       });
       setMeme(res);
+      void putMemeRecap(uploadId, res).catch(() => {});
     } finally {
       setBusyMeme(false);
     }

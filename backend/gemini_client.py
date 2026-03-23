@@ -14,6 +14,7 @@ from typing import Any
 
 import google.generativeai as genai
 import httpx
+from google.api_core import exceptions as google_api_exceptions
 
 from config import get_settings
 
@@ -22,12 +23,20 @@ logger = logging.getLogger(__name__)
 _MAX_ATTEMPTS = 4
 
 
-def _generative_model_id() -> str:
+def _normalize_model_id(model_id: str) -> str:
     """Normalize model id for GenerativeModel (strip optional 'models/' prefix)."""
-    name = get_settings().gemini_model.strip()
+    name = model_id.strip()
     if name.startswith("models/"):
         return name[7:]
     return name
+
+
+def _text_model_id() -> str:
+    return _normalize_model_id(get_settings().gemini_text_model)
+
+
+def _ingestion_model_id() -> str:
+    return _normalize_model_id(get_settings().gemini_ingestion_model)
 _BASE_DELAY_S = 0.8
 
 
@@ -40,6 +49,17 @@ def configure_gemini() -> None:
 
 def _sleep_backoff(attempt: int) -> None:
     time.sleep(_BASE_DELAY_S * (2**attempt))
+
+
+def _sleep_for_rate_limit(exc: Exception) -> None:
+    """Honor Gemini 429 retry hints when present (RPM / quota)."""
+    msg = str(exc)
+    m = re.search(r"retry in ([\d.]+)\s*s", msg, re.I)
+    if m:
+        delay = float(m.group(1))
+        time.sleep(min(max(delay + 0.25, 0.5), 90.0))
+        return
+    time.sleep(6.0)
 
 
 def extract_json_blob(text: str) -> Any:
@@ -61,24 +81,53 @@ def extract_json_blob(text: str) -> Any:
         return json.loads(snippet)
 
 
-def generate_text(prompt: str, *, temperature: float = 0.35) -> str:
-    """Plain text generation with retries."""
+def generate_text(
+    prompt: str,
+    *,
+    temperature: float = 0.35,
+    max_attempts: int | None = None,
+    max_output_tokens: int | None = None,
+) -> str:
+    """Plain text generation with retries.
+
+    `max_attempts` is useful for optional/latency-sensitive calls (e.g. building a small
+    concept graph during ingestion) so the upload API doesn't hang for too long.
+    """
     configure_gemini()
-    model = genai.GenerativeModel(_generative_model_id())
+    model = genai.GenerativeModel(_text_model_id())
     last_err: Exception | None = None
-    for attempt in range(_MAX_ATTEMPTS):
+    attempts = int(max_attempts) if max_attempts is not None else _MAX_ATTEMPTS
+    attempts = max(1, attempts)
+    for attempt in range(attempts):
         try:
+            gen_cfg: dict[str, Any] = {"temperature": temperature}
+            if max_output_tokens is not None:
+                gen_cfg["max_output_tokens"] = max_output_tokens
             resp = model.generate_content(
                 prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=temperature,
-                ),
+                generation_config=genai.types.GenerationConfig(**gen_cfg),
             )
             return (resp.text or "").strip()
+        except google_api_exceptions.ResourceExhausted as e:
+            last_err = e
+            logger.warning(
+                "Gemini generate_text rate limited (429), attempt %s — waiting before retry",
+                attempt,
+            )
+            if attempt < attempts - 1:
+                _sleep_for_rate_limit(e)
+        except google_api_exceptions.DeadlineExceeded as e:
+            last_err = e
+            logger.warning(
+                "Gemini generate_text deadline exceeded (504), attempt %s — waiting before retry",
+                attempt,
+            )
+            if attempt < attempts - 1:
+                _sleep_backoff(attempt)
         except Exception as e:  # noqa: BLE001 — demo: broad catch + retry
             last_err = e
             logger.exception("Gemini generate_text attempt %s failed", attempt)
-            if attempt < _MAX_ATTEMPTS - 1:
+            if attempt < attempts - 1:
                 _sleep_backoff(attempt)
     raise RuntimeError("Gemini generate_text failed after retries") from last_err
 
@@ -102,7 +151,7 @@ def generate_multimodal(
 ) -> str:
     """Multimodal single-part inline data (PDF, image, audio where supported)."""
     configure_gemini()
-    model = genai.GenerativeModel(_generative_model_id())
+    model = genai.GenerativeModel(_ingestion_model_id())
     last_err: Exception | None = None
     part = {"mime_type": mime_type, "data": data}
     for attempt in range(_MAX_ATTEMPTS):
@@ -114,6 +163,14 @@ def generate_multimodal(
                 ),
             )
             return (resp.text or "").strip()
+        except google_api_exceptions.ResourceExhausted as e:
+            last_err = e
+            logger.warning(
+                "Gemini multimodal rate limited (429), attempt %s — waiting before retry",
+                attempt,
+            )
+            if attempt < _MAX_ATTEMPTS - 1:
+                _sleep_for_rate_limit(e)
         except Exception as e:  # noqa: BLE001
             last_err = e
             logger.exception("Gemini multimodal attempt %s failed", attempt)
