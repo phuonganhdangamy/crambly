@@ -1,0 +1,10 @@
+{
+  "name": "crambly",
+  "private": true,
+  "workspaces": ["web", "types"],
+  "scripts": {
+    "dev:web": "npm run dev -w web",
+    "build:types": "npm run build -w types",
+    "dev:mobile": "npm run start --prefix mobile"
+  }
+}

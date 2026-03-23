@@ -1,0 +1,20 @@
+# Free local Redis for Crambly (optional queue). Official image: https://hub.docker.com/_/redis
+#
+# Start:  docker compose up -d
+# Stop:   docker compose down
+# Logs:   docker compose logs -f redis
+#
+# Then set REDIS_URL=redis://localhost:6379/0 in .env and restart the FastAPI server.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - crambly-redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+volumes:
+  crambly-redis-data:
