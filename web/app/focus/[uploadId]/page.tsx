@@ -1,12 +1,17 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FrictionHeatmap, SessionHeatDots } from "@/components/focus/FrictionHeatmap";
+import { OriginalFilePane } from "@/components/focus/OriginalFilePane";
 import { ReaderView } from "@/components/focus/ReaderView";
+import { SlideImageReader } from "@/components/focus/SlideImageReader";
 import { useChrome } from "@/components/layout/ChromeContext";
+import type { ExplainPayload } from "@/components/focus/SimplifiedBlock";
+import { fetchUploadPages } from "@/lib/api";
 import type { FocusSection } from "@/lib/focusTypes";
 import type { FocusUploadRow } from "@/lib/focusUploadApi";
 import { useFocusSession } from "@/lib/focusSession";
@@ -42,6 +47,21 @@ function formatClock(totalSec: number): string {
   return `${m}:${r.toString().padStart(2, "0")}`;
 }
 
+function ReadingAssistIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      className="shrink-0 text-[var(--color-accent-cyan)]"
+      fill="currentColor"
+      aria-hidden
+    >
+      <path d="M12 2l1.4 4.05h4.4l-3.57 2.6 1.37 4.13L12 13.77 8.4 12.78l1.37-4.13L6.2 6.05h4.4L12 2z" />
+    </svg>
+  );
+}
+
 export default function FocusReaderPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -49,20 +69,74 @@ export default function FocusReaderPage() {
   const goalMinutes = parseGoal(searchParams.get("goal"));
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { frictionScores, resetBlock } = useFocusSession(scrollRef);
+  const { frictionScores, resetBlock, highFrictionBlocks } = useFocusSession(scrollRef);
 
   const [sections, setSections] = useState<FocusSection[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [uploadMeta, setUploadMeta] = useState<FocusUploadRow | null>(null);
   const [simplifiedIds, setSimplifiedIds] = useState<Record<string, boolean>>({});
+  const [simplifiedByConcept, setSimplifiedByConcept] = useState<Record<string, ExplainPayload>>({});
+  const [learnerModeByConcept, setLearnerModeByConcept] = useState<Record<string, string>>({});
   const [progress, setProgress] = useState(0);
   const [endOpen, setEndOpen] = useState(false);
   const [tick, setTick] = useState(0);
+  const [originalView, setOriginalView] = useState<{ url: string; file_type: string; file_name: string } | null>(null);
+  const [originalViewError, setOriginalViewError] = useState<string | null>(null);
+  const [focusPane, setFocusPane] = useState<"original" | "text">("text");
+  const pendingReadingScrollRef = useRef(false);
+  const readingScrollElapsedSecRef = useRef(0);
+
+  const loadSignedViewUrl = useCallback(async () => {
+    const res = await fetch(`${apiBase()}/api/upload/${uploadId}/view-url`);
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(t || `HTTP ${res.status}`);
+    }
+    const data = (await res.json()) as { url?: string; file_type?: string; file_name?: string };
+    if (!data.url) throw new Error("No file URL returned");
+    return {
+      url: data.url,
+      file_type: String(data.file_type || "pdf"),
+      file_name: String(data.file_name || "file"),
+    };
+  }, [uploadId]);
 
   const { sessionGoal, smartNudgesEnabled, toggleSmartNudges, sectionsReviewed, simplificationsUsed, endSession } =
     useFocusStore();
 
   const { calming, setCalming } = useChrome();
+
+  const pagesQ = useQuery({
+    queryKey: ["uploadPages", uploadId],
+    queryFn: () => fetchUploadPages(uploadId),
+    enabled: Boolean(uploadId),
+    staleTime: 50 * 60 * 1000,
+    retry: 1,
+  });
+
+  const uploadPages = pagesQ.data;
+  const useSlideReading =
+    pagesQ.isFetched && pagesQ.isSuccess && Boolean(uploadPages?.length);
+
+  const sectionsForHeatmap = useMemo(() => {
+    if (!uploadPages?.length) return sections;
+    const sorted = [...uploadPages].sort((a, b) => a.page_number - b.page_number);
+    const ordered: FocusSection[] = [];
+    const seen = new Set<string>();
+    for (const p of sorted) {
+      if (p.concept_id && !seen.has(p.concept_id)) {
+        const s = sections.find((x) => x.id === p.concept_id);
+        if (s) {
+          ordered.push(s);
+          seen.add(p.concept_id);
+        }
+      }
+    }
+    for (const s of sections) {
+      if (!seen.has(s.id)) ordered.push(s);
+    }
+    return ordered;
+  }, [sections, uploadPages]);
 
   useEffect(() => {
     const st = useFocusStore.getState();
@@ -94,6 +168,77 @@ export default function FocusReaderPage() {
       cancelled = true;
     };
   }, [uploadId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setOriginalView(null);
+    setOriginalViewError(null);
+    void (async () => {
+      try {
+        const v = await loadSignedViewUrl();
+        if (cancelled) return;
+        setOriginalView(v);
+        const ft = v.file_type.toLowerCase();
+        if (ft === "pdf" || ft === "image") {
+          setFocusPane("original");
+        } else {
+          setFocusPane("text");
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setOriginalViewError(
+            e instanceof Error ? e.message : "Backend unavailable — original file preview needs the API with Supabase storage.",
+          );
+          setFocusPane("text");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uploadId, loadSignedViewUrl]);
+
+  useEffect(() => {
+    if (!uploadId) return;
+    const intervalMs = 50 * 60 * 1000;
+    const id = window.setInterval(() => {
+      void loadSignedViewUrl()
+        .then((v) => {
+          setOriginalView((prev) => (prev ? { ...prev, url: v.url } : prev));
+        })
+        .catch(() => {});
+    }, intervalMs);
+    return () => clearInterval(id);
+  }, [uploadId, loadSignedViewUrl]);
+
+  const onReadingViewTabClick = useCallback(() => {
+    if (focusPane === "original") {
+      pendingReadingScrollRef.current = true;
+      const start = useFocusStore.getState().sessionStartedAt;
+      const sec = start == null ? 0 : Math.floor((Date.now() - start) / 1000);
+      readingScrollElapsedSecRef.current = sec;
+    }
+    setFocusPane("text");
+  }, [focusPane]);
+
+  useEffect(() => {
+    if (focusPane !== "text" || sections.length === 0) return;
+    if (!pendingReadingScrollRef.current) return;
+    pendingReadingScrollRef.current = false;
+    const n = sections.length;
+    const sessionSec = readingScrollElapsedSecRef.current;
+    const estimatedReadingSeconds = n * 45;
+    const idx =
+      estimatedReadingSeconds > 0 ? Math.floor((sessionSec / estimatedReadingSeconds) * n) : 0;
+    const clamped = Math.max(0, Math.min(n - 1, idx));
+    const t = window.setTimeout(() => {
+      const el = scrollRef.current?.querySelector(
+        `.focus-friction-target[data-block-index="${clamped}"]`,
+      );
+      el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [focusPane, sections.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -204,8 +349,8 @@ export default function FocusReaderPage() {
     return sections.find((s) => s.id === bestId)?.title ?? "—";
   }, [sections, frictionScores]);
 
-  const scrollToBlock = useCallback((blockId: string) => {
-    const el = document.querySelector(`[data-block-id="${blockId}"]`);
+  const scrollToFrictionTarget = useCallback((conceptId: string) => {
+    const el = document.querySelector(`[data-concept-id="${conceptId}"]`);
     el?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
@@ -224,7 +369,7 @@ export default function FocusReaderPage() {
       }
     }
     setEndOpen(false);
-    if (bestId) scrollToBlock(bestId);
+    if (bestId) scrollToFrictionTarget(bestId);
   }
 
   const courseColor = uploadMeta?.course_color || "var(--color-accent-cyan)";
@@ -313,28 +458,127 @@ export default function FocusReaderPage() {
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pt-[52px]">
         <div className="mx-auto flex max-w-[1400px] flex-col gap-6 px-4 py-8 md:flex-row md:gap-6 md:px-12">
           <div className="min-w-0 flex-[0.65]">
-            {loadError && <p className="text-[var(--color-danger)]">{loadError}</p>}
-            {!loadError && sections.length === 0 && (
-              <p className="text-[var(--color-text-secondary)]">Loading sections…</p>
+            {originalView && (
+              <div className="mb-6 flex flex-wrap gap-2 border-b border-[var(--color-border-default)] pb-3">
+                <button
+                  type="button"
+                  onClick={() => setFocusPane("original")}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                    focusPane === "original"
+                      ? "bg-[var(--color-accent-cyan)] text-[var(--color-bg-primary)]"
+                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)]"
+                  }`}
+                >
+                  Original file
+                </button>
+                <button
+                  type="button"
+                  onClick={onReadingViewTabClick}
+                  title="Smart assistance available here"
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                    focusPane === "text"
+                      ? "bg-[var(--color-accent-cyan)] text-[var(--color-bg-primary)]"
+                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)]"
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    Reading view
+                    <ReadingAssistIcon />
+                  </span>
+                </button>
+              </div>
             )}
-            <ReaderView
-              sections={sections}
-              frictionScores={frictionScores}
-              smartNudgesEnabled={smartNudgesEnabled}
-              onResetBlock={resetBlock}
-              simplifiedIds={simplifiedIds}
-              onSimplifiedVisual={(id) => setSimplifiedIds((m) => ({ ...m, [id]: true }))}
-              onClearVisual={(id) => setSimplifiedIds((m) => ({ ...m, [id]: false }))}
-            />
+
+            {originalViewError && !originalView && (
+              <p className="mb-4 text-xs text-[var(--color-text-muted)]">{originalViewError}</p>
+            )}
+
+            {focusPane === "original" && originalView && (
+              <OriginalFilePane
+                url={originalView.url}
+                fileType={originalView.file_type}
+                fileName={originalView.file_name}
+                pdfOpenInNewTabUrl={originalView.file_type.toLowerCase() === "pdf" ? originalView.url : undefined}
+              />
+            )}
+
+            {focusPane === "text" && (
+              <>
+                {loadError && <p className="text-[var(--color-danger)]">{loadError}</p>}
+                {pagesQ.isError && (
+                  <p className="mb-4 text-xs text-[var(--color-danger)]">
+                    Slide images could not be loaded ({pagesQ.error instanceof Error ? pagesQ.error.message : "request failed"}
+                    ). Check that the FastAPI backend is running and reachable from Next.js (same machine:{" "}
+                    <code className="text-[var(--color-text-primary)]">NEXT_PUBLIC_API_URL</code>).
+                  </p>
+                )}
+                {!loadError &&
+                  pagesQ.isFetched &&
+                  pagesQ.isSuccess &&
+                  !useSlideReading &&
+                  originalView?.file_type?.toLowerCase() === "pdf" && (
+                    <p className="mb-4 rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+                      No slide PNGs are stored for this upload, so Reading view falls back to extracted text. Apply
+                      migration{" "}
+                      <code className="text-[var(--color-text-primary)]">20250331000000_upload_pages.sql</code> in
+                      Supabase, then re-upload the PDF. PNGs live in Storage under{" "}
+                      <code className="text-[var(--color-text-primary)]">page_images/&lt;upload_id&gt;/</code>. The{" "}
+                      <strong>Original file</strong> tab always shows the full PDF.
+                    </p>
+                  )}
+                {!loadError && !pagesQ.isFetched && (
+                  <p className="text-[var(--color-text-secondary)]">Loading reading view…</p>
+                )}
+                {!loadError && pagesQ.isFetched && sections.length === 0 && (
+                  <p className="text-[var(--color-text-secondary)]">Loading sections…</p>
+                )}
+                {!loadError && pagesQ.isFetched && useSlideReading && uploadPages ? (
+                  <SlideImageReader
+                    pages={uploadPages}
+                    concepts={sections}
+                    frictionScores={frictionScores}
+                    highFrictionIds={highFrictionBlocks}
+                    smartNudgesEnabled={smartNudgesEnabled}
+                    simplifiedByConcept={simplifiedByConcept}
+                    learnerModeByConcept={learnerModeByConcept}
+                    onSimplifySuccess={(conceptId, payload, learnerSnapshot) => {
+                      setSimplifiedByConcept((m) => ({ ...m, [conceptId]: payload }));
+                      setLearnerModeByConcept((m) => ({ ...m, [conceptId]: learnerSnapshot }));
+                      resetBlock(conceptId);
+                      setSimplifiedIds((m) => ({ ...m, [conceptId]: true }));
+                    }}
+                    onDismissSimplified={(conceptId) => {
+                      setSimplifiedByConcept((m) => {
+                        const n = { ...m };
+                        delete n[conceptId];
+                        return n;
+                      });
+                      setSimplifiedIds((m) => ({ ...m, [conceptId]: false }));
+                    }}
+                  />
+                ) : null}
+                {!loadError && pagesQ.isFetched && !useSlideReading && sections.length > 0 ? (
+                  <ReaderView
+                    sections={sections}
+                    frictionScores={frictionScores}
+                    smartNudgesEnabled={smartNudgesEnabled}
+                    onResetBlock={resetBlock}
+                    simplifiedIds={simplifiedIds}
+                    onSimplifiedVisual={(id) => setSimplifiedIds((m) => ({ ...m, [id]: true }))}
+                    onClearVisual={(id) => setSimplifiedIds((m) => ({ ...m, [id]: false }))}
+                  />
+                ) : null}
+              </>
+            )}
           </div>
           <div className="hidden min-w-0 flex-[0.35] md:block">
             <FrictionHeatmap
-              sections={sections}
+              sections={sectionsForHeatmap}
               frictionScores={frictionScores}
               simplificationsUsed={simplificationsUsed}
               sectionsReviewed={sectionsReviewed}
               simplifiedIds={simplifiedIds}
-              onSectionClick={scrollToBlock}
+              onSectionClick={scrollToFrictionTarget}
             />
           </div>
         </div>
@@ -372,7 +616,7 @@ export default function FocusReaderPage() {
                 <div>
                   <p className="text-[var(--color-text-muted)]">Sections read</p>
                   <p className="text-[var(--color-text-primary)]">
-                    {sectionsReviewed.length} / {sections.length || "—"}
+                    {sectionsReviewed.length} / {sectionsForHeatmap.length || sections.length || "—"}
                   </p>
                 </div>
                 <div>
@@ -388,7 +632,7 @@ export default function FocusReaderPage() {
               </div>
               <p className="mb-2 text-xs text-[var(--color-text-secondary)]">Your reading heatmap this session</p>
               <SessionHeatDots
-                sections={sections}
+                sections={sectionsForHeatmap}
                 frictionScores={frictionScores}
                 simplifiedIds={simplifiedIds}
                 sectionsReviewed={sectionsReviewed}

@@ -31,6 +31,7 @@ from agents.transformation_agent import iter_transform_ndjson, run_transform, tr
 from api.routes import api_router
 from config import Settings, get_settings
 from db import ensure_demo_user, supabase_client
+from tasks.common import storage_signed_url
 from elevenlabs_client import synthesize_speech
 
 logging.basicConfig(level=logging.INFO)
@@ -494,6 +495,106 @@ def api_uploads(uid: str, settings: Settings = Depends(get_settings)) -> list[di
                 row["course_color"] = cr.data[0].get("color")
         out.append(row)
     return out
+
+
+@app.get("/api/upload/{upload_id}/view-url")
+def api_upload_view_url(
+    upload_id: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """
+    Signed URL for the original file in Storage (Focus Mode / slide-accurate viewing).
+    Path is relative (uploads.file_url); never expose service role to the client.
+    """
+    user_id = str(settings.crambly_demo_user_id)
+    ensure_demo_user()
+    if not upload_id.strip():
+        raise HTTPException(400, "upload_id required")
+    sb = supabase_client()
+    res = (
+        sb.table("uploads")
+        .select("file_url,file_type,file_name")
+        .eq("id", upload_id.strip())
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(404, "Upload not found")
+    row = res.data[0]
+    path = row.get("file_url")
+    if not path or not str(path).strip():
+        raise HTTPException(404, "No file stored for this upload")
+    try:
+        url = storage_signed_url(settings, str(path).strip(), expires_s=3600)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("signed url failed")
+        raise HTTPException(500, f"Could not sign file URL: {e}") from e
+    return {
+        "url": url,
+        "file_type": str(row.get("file_type") or "pdf"),
+        "file_name": str(row.get("file_name") or "file"),
+    }
+
+
+@app.get("/api/upload/{upload_id}/pages")
+def api_upload_pages(
+    upload_id: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Signed URLs for per-page slide PNGs (PDF ingestion). Paths stay server-side."""
+    user_id = str(settings.crambly_demo_user_id)
+    ensure_demo_user()
+    uid = upload_id.strip()
+    if not uid:
+        raise HTTPException(400, "upload_id required")
+    sb = supabase_client()
+    up = (
+        sb.table("uploads")
+        .select("id")
+        .eq("id", uid)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not up.data:
+        raise HTTPException(404, "upload not found")
+    pages_res = (
+        sb.table("upload_pages")
+        .select("page_number, storage_path, width, height, concept_id")
+        .eq("upload_id", uid)
+        .order("page_number")
+        .execute()
+    )
+    bucket = settings.supabase_upload_bucket
+    out: list[dict[str, Any]] = []
+    for row in pages_res.data or []:
+        path = str(row.get("storage_path") or "").strip()
+        if not path:
+            continue
+        try:
+            signed = sb.storage.from_(bucket).create_signed_url(path, 3600)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("signed url for page image failed: %s", e)
+            continue
+        url: str | None = None
+        if isinstance(signed, dict):
+            url = signed.get("signedURL") or signed.get("signedUrl")
+            if url is not None:
+                url = str(url)
+        if not url:
+            continue
+        cid = row.get("concept_id")
+        out.append(
+            {
+                "page_number": int(row["page_number"]),
+                "signed_url": url,
+                "width": int(row.get("width") or 0),
+                "height": int(row.get("height") or 0),
+                "concept_id": str(cid) if cid else None,
+            }
+        )
+    return {"pages": out}
 
 
 @app.post("/api/preferences")

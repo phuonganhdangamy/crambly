@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from uuid import uuid4
 
@@ -25,6 +26,9 @@ from gemini_client import (
     generate_text,
 )
 from redis_util import enqueue_ingestion
+from utils.content_blocks_to_markdown import blocks_to_markdown
+from utils.gemini_vision_extract import extract_slide_from_png
+from utils.pdf_to_images import pdf_to_page_images
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +111,166 @@ def _normalize_concepts(raw: Any) -> list[dict[str, Any]]:
                 }
             )
     return out
+
+
+def _slide_payload_to_markdown(payload: dict[str, Any]) -> str:
+    """Vision JSON → markdown body (headings, bullets, tables, equations)."""
+    blocks = list(payload.get("content_blocks") or [])
+    title = payload.get("slide_title")
+    t_str = str(title).strip() if title else ""
+
+    body = blocks_to_markdown(blocks)
+    parts: list[str] = []
+    if t_str:
+        first = blocks[0] if blocks else None
+        first_text = ""
+        ft = ""
+        if isinstance(first, dict):
+            first_text = str(first.get("text") or "").strip()
+            ft = str(first.get("type") or "").lower()
+        dup = first_text == t_str and ft in ("heading", "subheading")
+        if not dup:
+            parts.append(f"### {t_str}")
+    if body:
+        parts.append(body)
+    return "\n\n".join(parts).strip()
+
+
+def _enrich_slide_metadata(
+    *,
+    title_hint: str,
+    raw_content: str,
+    has_math_guess: bool,
+    has_code_guess: bool,
+) -> dict[str, Any]:
+    """Text-only Gemini: title, summary, flags — raw_content stays vision markdown."""
+    snip = (raw_content or "")[:2800]
+    if not snip.strip():
+        snip = title_hint
+    prompt = (
+        "You annotate a lecture slide for a study app.\n"
+        "Given the slide content (markdown below), return JSON ONLY:\n"
+        '{ "title": string (short display title, <= 100 chars),\n'
+        '  "summary": string (exactly two sentences),\n'
+        '  "exam_importance": number (integer 1-5),\n'
+        '  "has_math": boolean,\n'
+        '  "has_code": boolean\n'
+        "}\n\n"
+        f"Slide hint: {title_hint}\n"
+        f"Extraction hints (trust markdown if they disagree): has_math_guess={has_math_guess}, "
+        f"has_code_guess={has_code_guess}\n\n"
+        "Content:\n---\n"
+        f"{snip}\n"
+        "---\n\n"
+        "Rules: title names the topic (not generic “Slide”). Summary is what a student should recall.\n"
+        "Respond with valid JSON only. No markdown fences."
+    )
+    try:
+        raw = generate_text(
+            prompt,
+            temperature=0.2,
+            max_output_tokens=1024,
+            max_attempts=2,
+        )
+        meta = extract_json_blob(raw)
+        if not isinstance(meta, dict):
+            raise ValueError("metadata not an object")
+    except Exception:  # noqa: BLE001
+        logger.warning("Slide metadata enrichment failed; using fallbacks", exc_info=True)
+        return {
+            "title": title_hint[:200],
+            "summary": f"This section covers {title_hint}."[:500],
+            "exam_importance": 3,
+            "has_math": has_math_guess,
+            "has_code": has_code_guess,
+        }
+
+    title = str(meta.get("title", "")).strip() or title_hint
+    summary = str(meta.get("summary", "")).strip()
+    if not summary:
+        summary = f"Key ideas from {title}."
+    imp = int(meta.get("exam_importance", 3))
+    imp = max(1, min(5, imp))
+    hm = meta.get("has_math")
+    has_math = bool(hm) if hm is not None else has_math_guess
+    hc = meta.get("has_code")
+    has_code = bool(hc) if hc is not None else has_code_guess
+    return {
+        "title": title[:200],
+        "summary": summary,
+        "exam_importance": imp,
+        "has_math": has_math,
+        "has_code": has_code,
+    }
+
+
+def _concepts_from_pdf_pages(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One concept per PDF page: Gemini Vision → raw_content (for pipelines) + metadata."""
+    if not pages:
+        raise RuntimeError("PDF has no pages")
+
+    def extract_one(png: bytes) -> dict[str, Any]:
+        return extract_slide_from_png(png)
+
+    payloads: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(extract_one, p["png_bytes"]) for p in pages]
+        for fut in futures:
+            payloads.append(fut.result())
+
+    concepts: list[dict[str, Any]] = []
+    for i, payload in enumerate(payloads, start=1):
+        md = _slide_payload_to_markdown(payload)
+        if not md.strip():
+            md = str(payload.get("raw_text") or "").strip()
+        if not md.strip():
+            md = f"_(No text extracted for slide {i})_"
+        title_hint = str(payload.get("slide_title") or "").strip() or f"Slide {i}"
+        meta = _enrich_slide_metadata(
+            title_hint=title_hint,
+            raw_content=md,
+            has_math_guess=bool(payload.get("has_math")),
+            has_code_guess=bool(payload.get("has_code")),
+        )
+        concepts.append(
+            {
+                "title": meta["title"],
+                "summary": meta["summary"],
+                "raw_content": md,
+                "exam_importance": meta["exam_importance"],
+                "has_math": meta["has_math"],
+                "has_code": meta["has_code"],
+            }
+        )
+    return concepts
+
+
+def _store_pdf_page_images(sb: Any, bucket: str, upload_id: str, pages: list[dict[str, Any]]) -> None:
+    """Upload each page PNG to storage and insert upload_pages rows (concept_id set later)."""
+    for p in pages:
+        page_num = int(p["page_number"])
+        path = f"page_images/{upload_id}/page_{page_num}.png"
+        try:
+            sb.storage.from_(bucket).upload(
+                path,
+                p["png_bytes"],
+                file_options={"content-type": "image/png", "upsert": "true"},
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Page %s PNG upload failed: %s", page_num, e)
+            continue
+        try:
+            sb.table("upload_pages").insert(
+                {
+                    "upload_id": upload_id,
+                    "page_number": page_num,
+                    "storage_path": path,
+                    "width": int(p["width"]),
+                    "height": int(p["height"]),
+                }
+            ).execute()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("upload_pages insert failed (run migration 20250331000000_upload_pages.sql?): %s", e)
 
 
 def _ingest_multimodal(prompt: str, *, mime_type: str, data: bytes, temperature: float = 0.25) -> str:
@@ -296,13 +460,19 @@ def run_ingestion(
         if not mime.startswith("audio/"):
             mime = "audio/mpeg"
 
+    pdf_pages: list[dict[str, Any]] | None = None
     try:
-        raw_text = _ingest_multimodal(
-            INGESTION_PROMPT,
-            mime_type=mime,
-            data=file_bytes,
-        )
-        concepts = _normalize_concepts(extract_json_blob(raw_text))
+        if file_type == "pdf":
+            pdf_pages = pdf_to_page_images(file_bytes)
+            _store_pdf_page_images(sb, bucket, upload_id, pdf_pages)
+            concepts = _concepts_from_pdf_pages(pdf_pages)
+        else:
+            raw_text = _ingest_multimodal(
+                INGESTION_PROMPT,
+                mime_type=mime,
+                data=file_bytes,
+            )
+            concepts = _normalize_concepts(extract_json_blob(raw_text))
     except Exception as e:  # noqa: BLE001
         logger.exception("Ingestion Gemini failed")
         sb.table("uploads").update({"status": "error"}).eq("id", upload_id).execute()
@@ -347,6 +517,18 @@ def run_ingestion(
         except Exception:  # noqa: BLE001
             logger.exception("Concept insert failed")
             raise
+
+    if file_type == "pdf" and pdf_pages:
+        for idx, row_out in enumerate(inserted_rows):
+            cid = str(row_out.get("id", ""))
+            if not cid:
+                continue
+            try:
+                sb.table("upload_pages").update({"concept_id": cid}).eq("upload_id", upload_id).eq(
+                    "page_number", idx + 1
+                ).execute()
+            except Exception:  # noqa: BLE001
+                logger.warning("upload_pages concept_id link failed for page %s", idx + 1, exc_info=True)
 
     graph = _build_concept_graph(inserted_rows)
     if graph:

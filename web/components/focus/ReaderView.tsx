@@ -29,13 +29,13 @@ export function ReaderView({
         return (
           <motion.div
             key={section.id}
-            data-block-id={section.id}
+            data-concept-id={section.id}
             data-block-index={index}
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: index * 0.06 }}
             style={{ "--friction": f } as React.CSSProperties}
-            className={`reader-block ${simplifiedIds[section.id] ? "simplified" : ""}`}
+            className={`reader-block focus-friction-target ${simplifiedIds[section.id] ? "simplified" : ""}`}
           >
             <h3 className="mb-3 text-[1.1rem] font-semibold text-[var(--color-text-primary)]">
               {section.title}
