@@ -28,9 +28,6 @@ from redis_util import enqueue_ingestion
 
 logger = logging.getLogger(__name__)
 
-# Matches web/lib/models.ts MODELS.ingestion (keep in sync conceptually).
-INGESTION_MODEL_ID = "gemini-2.5-flash"
-
 INGESTION_PROMPT = """You are an academic content parser. Extract all sections from the following content.
 For each section return:
 {
@@ -52,7 +49,8 @@ Rules:
 - key_terms: important technical terms in this section.
 
 Return as a JSON array only. Do not add commentary outside the JSON.
-For raw_content: if the source contains LaTeX math expressions, wrap them in $...$ for inline and $$...$$ for block expressions."""
+For raw_content: if the source contains LaTeX math expressions, wrap them in $...$ for inline and $$...$$ for block expressions.
+CRITICAL for valid JSON: inside every string value, any literal backslash must be written as \\\\ (e.g. LaTeX \\theta must appear as \\\\theta in the JSON text)."""
 
 GRAPH_PROMPT = """You map relationships between course concepts for an interactive graph (max 10 nodes).
 
@@ -112,9 +110,9 @@ def _normalize_concepts(raw: Any) -> list[dict[str, Any]]:
 
 
 def _ingest_multimodal(prompt: str, *, mime_type: str, data: bytes, temperature: float = 0.25) -> str:
-    """Ingestion-only multimodal call on MODELS.ingestion (gemini-2.5-flash)."""
+    """Multimodal PDF/image parse; model id from `GEMINI_INGESTION_MODEL` (see config.Settings)."""
     configure_gemini()
-    model = genai.GenerativeModel(INGESTION_MODEL_ID)
+    model = genai.GenerativeModel(get_settings().gemini_ingestion_model)
     part = {"mime_type": mime_type, "data": data}
     last_err: Exception | None = None
     for attempt in range(4):

@@ -20,7 +20,15 @@ import { WorkedExampleCard } from "@/components/WorkedExampleCard";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import type { ConceptCatalogItem, MemePipelineResponse, StudyDeckRow, StudyDeckTasksStatus, StudyTransformSection } from "@/lib/api";
+import { ProgressBar } from "@/components/ui/ProgressBar";
+import type {
+  ConceptCatalogItem,
+  ConceptGraphPayload,
+  MemePipelineResponse,
+  StudyDeckRow,
+  StudyDeckTasksStatus,
+  StudyTransformSection,
+} from "@/lib/api";
 import {
   deleteStudyDeck,
   fetchConceptsByUpload,
@@ -33,10 +41,12 @@ import {
   postAudioClipMeta,
   postDeckGenerate,
   postMeme,
-  postTransform,
   postTts,
+  probeTransformCache,
   putMemeRecap,
+  streamTransform,
 } from "@/lib/api";
+import { conceptToFallbackSection, normalizeSections } from "@/lib/transforms";
 import { pushActivity } from "@/lib/localActivity";
 import { recordStudySession } from "@/lib/localSessions";
 import { getSupabaseBrowser } from "@/lib/supabase";
@@ -65,38 +75,6 @@ function readDial(): number | undefined {
   const d = localStorage.getItem("crambly_complexity");
   if (!d) return undefined;
   return Number(d) / 100;
-}
-
-function normalizeSections(raw: unknown): StudyTransformSection[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map((s) => {
-    const o = s as Record<string, unknown>;
-    const we = o.worked_example as Record<string, unknown> | undefined;
-    const fa = o.formula_annotation as Record<string, unknown> | null | undefined;
-    let terms: { symbol: string; meaning: string }[] = [];
-    if (fa && Array.isArray(fa.terms)) {
-      terms = fa.terms
-        .filter((t): t is Record<string, unknown> => typeof t === "object" && t !== null)
-        .map((t) => ({
-          symbol: String(t.symbol ?? ""),
-          meaning: String(t.meaning ?? ""),
-        }));
-    }
-    return {
-      header: String(o.header ?? ""),
-      body: String(o.body ?? ""),
-      worked_example: {
-        scenario: String(we?.scenario ?? ""),
-        steps: Array.isArray(we?.steps) ? we!.steps.map((x) => String(x)) : [],
-        plain_english: String(we?.plain_english ?? ""),
-      },
-      has_math: Boolean(o.has_math),
-      formula_annotation:
-        fa && typeof fa.formula === "string"
-          ? { formula: fa.formula, terms }
-          : null,
-    };
-  });
 }
 
 function taskPending(ts: StudyDeckTasksStatus | null | undefined, key: (typeof DECK_TASKS)[number]): boolean {
@@ -221,13 +199,13 @@ export default function StudyPage() {
     };
   }, [uploadId]);
 
-  const q = useQuery({
-    queryKey: ["transform", uploadId, mode, dial],
-    queryFn: () => postTransform(uploadId, mode, dial),
-    enabled: Boolean(uploadId) && prefsLoaded,
-    staleTime: 1000 * 60 * 10,
-    gcTime: 1000 * 60 * 30,
-  });
+  const [streamedSections, setStreamedSections] = useState<StudyTransformSection[]>([]);
+  const [streamProgress, setStreamProgress] = useState<{ batchIndex: number; totalBatches: number } | null>(null);
+  const [streamComplete, setStreamComplete] = useState(false);
+  const [streamError, setStreamError] = useState(false);
+  const [transformSummary, setTransformSummary] = useState("");
+  const [transformMap, setTransformMap] = useState("");
+  const [transformTerms, setTransformTerms] = useState<string[]>([]);
 
   const deckQ = useQuery({
     queryKey: ["studyDeck", uploadId],
@@ -244,15 +222,87 @@ export default function StudyPage() {
   const conceptsQ = useQuery({
     queryKey: ["concepts", uploadId],
     queryFn: () => fetchConceptsByUpload(uploadId!),
-    enabled: Boolean(uploadId) && Boolean(q.data),
+    enabled: Boolean(uploadId) && prefsLoaded,
   });
 
   const quizQ = useQuery({
     queryKey: ["quizBurst", uploadId],
     queryFn: () => fetchQuizBurstForUpload(uploadId!),
-    enabled: Boolean(uploadId) && Boolean(q.data) && studyUIMode === "grind",
+    enabled:
+      Boolean(uploadId) &&
+      prefsLoaded &&
+      studyUIMode === "grind" &&
+      (streamComplete || streamError),
     staleTime: 1000 * 60 * 15,
   });
+
+  useEffect(() => {
+    if (!uploadId || !prefsLoaded) return;
+
+    setStreamedSections([]);
+    setStreamProgress(null);
+    setStreamComplete(false);
+    setStreamError(false);
+    setTransformSummary("");
+    setTransformMap("");
+    setTransformTerms([]);
+
+    const ac = new AbortController();
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const probe = await probeTransformCache(uploadId, mode, dial, { signal: ac.signal });
+        if (cancelled || ac.signal.aborted) return;
+        if (probe.cached && probe.payload) {
+          const p = probe.payload;
+          setStreamedSections(normalizeSections(p.sections));
+          setTransformSummary(p.summary ?? "");
+          setTransformMap(p.concept_map ?? "");
+          setTransformTerms(Array.isArray(p.key_terms) ? p.key_terms.map(String) : []);
+          setStreamComplete(true);
+          return;
+        }
+        await streamTransform(
+          uploadId,
+          mode,
+          dial,
+          (sections, meta) => {
+            if (cancelled || ac.signal.aborted) return;
+            setStreamedSections((prev) => [...prev, ...normalizeSections(sections)]);
+            setStreamProgress(meta);
+          },
+          (summary, conceptMap, keyTerms) => {
+            if (cancelled || ac.signal.aborted) return;
+            setTransformSummary(summary);
+            setTransformMap(conceptMap);
+            setTransformTerms(keyTerms);
+            setStreamComplete(true);
+            setStreamProgress(null);
+          },
+          (err) => {
+            if (cancelled || ac.signal.aborted) return;
+            console.error("Stream transform error:", err);
+            setStreamError(true);
+            setStreamComplete(true);
+            setStreamProgress(null);
+          },
+          { signal: ac.signal },
+        );
+      } catch (e) {
+        if (cancelled || ac.signal.aborted) return;
+        console.error(e);
+        setStreamError(true);
+        setStreamComplete(true);
+        setStreamProgress(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [uploadId, prefsLoaded, mode, dial]);
 
   const invalidateDeck = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["studyDeck", uploadId] });
@@ -279,11 +329,46 @@ export default function StudyPage() {
     };
   }, [uploadId, invalidateDeck]);
 
-  const sections = useMemo(() => normalizeSections(q.data?.sections), [q.data?.sections]);
-  const catalog = useMemo(
-    (): ConceptCatalogItem[] => q.data?.concepts_catalog ?? [],
-    [q.data?.concepts_catalog],
-  );
+  const sections = useMemo((): StudyTransformSection[] => {
+    if (streamedSections.length > 0) return streamedSections;
+    const rows = conceptsQ.data ?? [];
+    if (rows.length === 0) return [];
+    return rows.map((c) =>
+      conceptToFallbackSection({
+        id: c.id,
+        title: c.title,
+        summary: c.summary,
+        exam_importance: c.exam_importance,
+        has_math: c.has_math,
+      }),
+    );
+  }, [streamedSections, conceptsQ.data]);
+
+  const catalog = useMemo((): ConceptCatalogItem[] => {
+    const rows = conceptsQ.data ?? [];
+    return rows.map((c) => ({
+      id: c.id,
+      title: c.title,
+      summary: c.summary,
+      has_math: Boolean(c.has_math),
+    }));
+  }, [conceptsQ.data]);
+
+  const conceptGraph = useMemo((): ConceptGraphPayload | null => {
+    const rows = conceptsQ.data ?? [];
+    for (const r of rows) {
+      const gd = r.graph_data;
+      if (
+        gd &&
+        typeof gd === "object" &&
+        Array.isArray((gd as ConceptGraphPayload).nodes) &&
+        ((gd as ConceptGraphPayload).nodes?.length ?? 0) > 0
+      ) {
+        return gd as ConceptGraphPayload;
+      }
+    }
+    return null;
+  }, [conceptsQ.data]);
   const selectedConcept = useMemo(() => {
     if (!selectedNodeId) return null;
     return catalog.find((c) => c.id === selectedNodeId) ?? null;
@@ -305,19 +390,23 @@ export default function StudyPage() {
   }, [audioUrl]);
 
   async function onAudio() {
-    if (!q.data?.summary) return;
+    const summaryText =
+      transformSummary.trim() ||
+      (conceptsQ.data ?? []).map((c) => c.summary).join("\n\n").slice(0, 2400);
+    if (!summaryText.trim()) return;
     setBusyAudio(true);
     try {
-      const { audio_base64, mime } = await postTts(q.data.summary.slice(0, 2400));
+      const { audio_base64, mime } = await postTts(summaryText.slice(0, 2400));
       const blob = await fetch(`data:${mime};base64,${audio_base64}`).then((r) => r.blob());
       const url = URL.createObjectURL(blob);
       setAudioUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return url;
       });
+      const kt = transformTerms[0] ?? catalog[0]?.title;
       void postAudioClipMeta({
-        title: q.data?.key_terms?.[0] ? `${q.data.key_terms[0]} explainer` : "Concept explainer",
-        transcript: q.data?.summary?.slice(0, 4000) || "",
+        title: kt ? `${kt} explainer` : "Concept explainer",
+        transcript: summaryText.slice(0, 4000),
       }).catch(() => {});
     } finally {
       setBusyAudio(false);
@@ -327,8 +416,10 @@ export default function StudyPage() {
   async function onMeme(reimagine: boolean) {
     setBusyMeme(true);
     try {
-      const title = q.data?.key_terms?.[0] || "Concept recap";
-      const summary = q.data?.summary || "";
+      const title = transformTerms[0] || catalog[0]?.title || "Concept recap";
+      const summary =
+        transformSummary.trim() ||
+        (conceptsQ.data ?? []).map((c) => c.summary).join("\n\n").slice(0, 4000);
       const res = await postMeme(title, summary, {
         reimagine,
         priorBrief: reimagine ? meme?.brief ?? null : null,
@@ -380,8 +471,11 @@ export default function StudyPage() {
   const deck = deckQ.data ?? undefined;
   const ts = deck?.tasks_status;
 
-  const memeTitle = q.data?.key_terms?.[0] || "Study recap";
+  const memeTitle = transformTerms[0] || catalog[0]?.title || "Study recap";
   const memeTone = meme?.brief?.template || "Custom";
+
+  const lectureReady =
+    prefsLoaded && !conceptsQ.isLoading && (conceptsQ.data?.length ?? 0) > 0;
 
   return (
     <motion.div
@@ -409,15 +503,33 @@ export default function StudyPage() {
         </div>
       </header>
 
-      {q.isLoading && (
+      {conceptsQ.isLoading && (
         <div className="flex items-center gap-3 text-[var(--color-text-secondary)]">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-accent-cyan)] border-t-transparent" />
-          Transforming with Gemini…
+          Loading lecture…
         </div>
       )}
-      {q.isError && <p className="text-[var(--color-danger)]">Transform failed. Check API keys and backend logs.</p>}
 
-      {q.data && (
+      {streamProgress && !streamComplete && !streamError && streamProgress.totalBatches > 0 && (
+        <div className="mb-6 space-y-2">
+          <ProgressBar
+            value={((streamProgress.batchIndex + 1) / streamProgress.totalBatches) * 100}
+            color="var(--color-accent-cyan)"
+          />
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            Personalizing for {MODE_LABELS[mode]} · batch {streamProgress.batchIndex + 1} of{" "}
+            {streamProgress.totalBatches}
+          </p>
+        </div>
+      )}
+
+      {streamError && (
+        <p className="text-sm text-[var(--color-warning)]">
+          Some sections could not be personalized. Showing original content where needed.
+        </p>
+      )}
+
+      {lectureReady && (
         <div className="space-y-10">
           <div className="relative flex rounded-full bg-[var(--color-bg-tertiary)] p-1 sm:max-w-md">
             {(["grind", "chill"] as const).map((m) => (
@@ -610,7 +722,7 @@ export default function StudyPage() {
           <section className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6 shadow-[var(--shadow-card)]">
             <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Summary</h2>
             <div className="mt-3 text-[var(--color-text-primary)]">
-              <MathRichText text={q.data.summary} />
+              <MathRichText text={transformSummary || "Summary will appear when personalization finishes."} />
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
               <Button type="button" variant="primary" disabled={busyAudio} loading={busyAudio} onClick={() => void onAudio()}>
@@ -633,11 +745,7 @@ export default function StudyPage() {
           <section>
             <h2 className="mb-3 text-xl font-semibold text-[var(--color-text-primary)]">Concept relationships</h2>
             <div className="grid gap-6 lg:grid-cols-[1fr_minmax(260px,320px)]">
-              <ConceptGraphView
-                graph={q.data.concept_graph ?? null}
-                selectedId={selectedNodeId}
-                onSelectNode={setSelectedNodeId}
-              />
+              <ConceptGraphView graph={conceptGraph} selectedId={selectedNodeId} onSelectNode={setSelectedNodeId} />
               <aside className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-4 lg:min-h-[200px]">
                 {!selectedConcept && (
                   <p className="text-sm text-[var(--color-text-muted)]">Select a node to see its summary and how it connects.</p>
@@ -685,27 +793,40 @@ export default function StudyPage() {
           <section className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6">
             <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Concept map (text)</h2>
             <div className="mt-3 text-sm text-[var(--color-text-primary)]">
-              <MathRichText text={q.data.concept_map} className="whitespace-pre-wrap" />
+              <MathRichText text={transformMap || "—"} className="whitespace-pre-wrap" />
             </div>
           </section>
 
           <section className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6">
             <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Key terms</h2>
-            <ul className="mt-3 list-disc space-y-1 pl-5 text-[var(--color-text-primary)]">
-              {(q.data.key_terms ?? []).map((t) => (
-                <li key={t}>{t}</li>
-              ))}
-            </ul>
+            {transformTerms.length === 0 ? (
+              <p className="mt-3 text-sm text-[var(--color-text-muted)]">—</p>
+            ) : (
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-[var(--color-text-primary)]">
+                {transformTerms.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+            )}
           </section>
 
           {sections.length > 0 && (
             <section className="space-y-4">
               <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Sections & practice</h2>
               {sections.map((s, idx) => (
-                <div
-                  key={`${s.header}-${idx}`}
+                <motion.div
+                  key={`${s.concept_id ?? "x"}-${idx}-${s.header.slice(0, 32)}`}
+                  initial={{ opacity: s.is_fallback ? 0.72 : 1 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.35, ease: "easeOut" }}
                   className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)]/80 p-5"
                 >
+                  {s.is_fallback && (
+                    <div className="mb-3 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                      <span className="inline-block h-3 w-16 animate-pulse rounded bg-[var(--color-bg-tertiary)]" />
+                      <span>Enhancing for {MODE_LABELS[mode]}…</span>
+                    </div>
+                  )}
                   <h3 className="font-semibold text-[var(--color-accent-cyan)]">
                     <MathRichText text={s.header} />
                   </h3>
@@ -721,7 +842,7 @@ export default function StudyPage() {
                         terms={s.formula_annotation.terms ?? []}
                       />
                     )}
-                </div>
+                </motion.div>
               ))}
             </section>
           )}

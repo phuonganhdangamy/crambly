@@ -9,11 +9,12 @@ these same functions later (tool boundaries already align 1:1 with routes).
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 from datetime import datetime, timezone
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from agents.deadline_agent import (
@@ -26,7 +27,7 @@ from agents.digital_twin_agent import apply_quiz_result
 from agents.ingestion_agent import run_ingestion
 from agents.study_dna_agent import run_study_dna
 from agents.expressive_media_agent import run_meme_pipeline
-from agents.transformation_agent import run_transform
+from agents.transformation_agent import iter_transform_ndjson, run_transform, transform_study_cache_key
 from api.routes import api_router
 from config import Settings, get_settings
 from db import ensure_demo_user, supabase_client
@@ -216,8 +217,7 @@ def api_transform(
 
     allowed_modes = {"adhd", "visual", "global_scholar", "audio", "exam_cram"}
     mode_key = body.mode if body.mode in allowed_modes else "adhd"
-    dial_key = "null" if body.complexity_dial is None else f"{float(body.complexity_dial):.3f}"
-    cache_key = f"{mode_key}|{dial_key}"
+    cache_key = transform_study_cache_key(mode_key, body.complexity_dial)
 
     try:
         sb = supabase_client()
@@ -275,6 +275,96 @@ def api_transform(
         return payload
     except Exception as e:  # noqa: BLE001
         logger.exception("transform failed")
+        raise HTTPException(500, str(e)) from e
+
+
+def _study_transform_cache_ready(entry: Any) -> bool:
+    """Aligned with cached hit path in api_transform (complete + non-empty concept graph)."""
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("partial") is True:
+        return False
+    graph = entry.get("concept_graph")
+    return (
+        isinstance(graph, dict)
+        and isinstance(graph.get("nodes"), list)
+        and len(graph.get("nodes") or []) > 0
+    )
+
+
+@app.get("/api/transform/cache")
+def api_transform_cache(
+    upload_id: str,
+    mode: str,
+    complexity_dial: float | None = Query(default=None),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    user_id = str(settings.crambly_demo_user_id)
+    ensure_demo_user()
+    allowed_modes = {"adhd", "visual", "global_scholar", "audio", "exam_cram"}
+    mode_key = mode if mode in allowed_modes else "adhd"
+    cache_key = transform_study_cache_key(mode_key, complexity_dial)
+    try:
+        sb = supabase_client()
+        try:
+            upload_row = (
+                sb.table("uploads")
+                .select("study_cache")
+                .eq("id", upload_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+        except Exception:
+            logger.warning("transform cache probe: study_cache column missing?", exc_info=True)
+            return {"cached": False, "payload": None}
+        if not upload_row.data:
+            raise HTTPException(404, "Upload not found")
+        study_cache = upload_row.data[0].get("study_cache")
+        if not isinstance(study_cache, dict):
+            return {"cached": False, "payload": None}
+        entry = study_cache.get(cache_key)
+        if isinstance(entry, dict) and _study_transform_cache_ready(entry):
+            sb.table("uploads").update(
+                {"learner_mode": mode_key, "complexity_dial": complexity_dial},
+            ).eq("id", upload_id).eq("user_id", user_id).execute()
+            return {"cached": True, "payload": entry}
+        return {"cached": False, "payload": None}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.exception("transform cache probe failed")
+        raise HTTPException(500, str(e)) from e
+
+
+@app.post("/api/transform/stream")
+def api_transform_stream(
+    body: TransformBody,
+    settings: Settings = Depends(get_settings),
+) -> StreamingResponse:
+    user_id = str(settings.crambly_demo_user_id)
+    ensure_demo_user()
+    allowed_modes = {"adhd", "visual", "global_scholar", "audio", "exam_cram"}
+    mode_key = body.mode if body.mode in allowed_modes else "adhd"
+    try:
+        sb = supabase_client()
+        chk = sb.table("concepts").select("id").eq("upload_id", body.upload_id).limit(1).execute()
+        if not chk.data:
+            raise HTTPException(404, "No concepts found for upload")
+
+        def gen() -> Iterator[str]:
+            yield from iter_transform_ndjson(
+                user_id=user_id,
+                upload_id=body.upload_id,
+                learner_mode=mode_key,
+                complexity_dial=body.complexity_dial,
+            )
+
+        return StreamingResponse(gen(), media_type="application/x-ndjson")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.exception("transform stream failed")
         raise HTTPException(500, str(e)) from e
 
 

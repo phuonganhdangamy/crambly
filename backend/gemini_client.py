@@ -62,6 +62,73 @@ def _sleep_for_rate_limit(exc: Exception) -> None:
     time.sleep(6.0)
 
 
+def _json_unescaped_quote(s: str, i: int) -> bool:
+    if i < 0 or i >= len(s) or s[i] != '"':
+        return False
+    bs = 0
+    j = i - 1
+    while j >= 0 and s[j] == "\\":
+        bs += 1
+        j -= 1
+    return bs % 2 == 0
+
+
+def _json_valid_escape_span(s: str, i: int) -> tuple[bool, int]:
+    """If s[i] is '\\', return (is_valid_escape, index_after_escape)."""
+    if i >= len(s) or s[i] != "\\":
+        return False, i
+    if i + 1 >= len(s):
+        return False, i
+    nxt = s[i + 1]
+    if nxt in '"\\/bfnrt':
+        return True, i + 2
+    if nxt == "u" and i + 6 <= len(s):
+        hx = s[i + 2 : i + 6]
+        if len(hx) == 4 and all(c in "0123456789abcdefABCDEF" for c in hx):
+            return True, i + 6
+    return False, i
+
+
+def repair_json_invalid_string_escapes(s: str) -> str:
+    """
+    Gemini often puts LaTeX (e.g. \\alpha, \\mathbb) in JSON strings without doubling backslashes.
+    Python's json rejects those as Invalid \\escape. Fix by doubling backslashes that start
+    invalid escapes, only inside double-quoted string regions.
+    """
+    out: list[str] = []
+    i = 0
+    in_string = False
+    while i < len(s):
+        ch = s[i]
+        if not in_string:
+            out.append(ch)
+            if ch == '"' and _json_unescaped_quote(s, i):
+                in_string = True
+            i += 1
+            continue
+        if ch == '"' and _json_unescaped_quote(s, i):
+            out.append(ch)
+            in_string = False
+            i += 1
+            continue
+        if ch == "\\":
+            ok, end = _json_valid_escape_span(s, i)
+            if ok:
+                out.append(s[i:end])
+                i = end
+            else:
+                out.append("\\\\")
+                if i + 1 < len(s):
+                    out.append(s[i + 1])
+                    i += 2
+                else:
+                    i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def extract_json_blob(text: str) -> Any:
     """Parse first JSON object or array from model output (strips ``` fences)."""
     cleaned = text.strip()
@@ -69,8 +136,16 @@ def extract_json_blob(text: str) -> Any:
     if fence:
         cleaned = fence.group(1).strip()
     cleaned = cleaned.strip()
+
+    def _loads(blob: str) -> Any:
+        try:
+            return json.loads(blob)
+        except json.JSONDecodeError:
+            fixed = repair_json_invalid_string_escapes(blob)
+            return json.loads(fixed)
+
     try:
-        return json.loads(cleaned)
+        return _loads(cleaned)
     except json.JSONDecodeError:
         start_obj, start_arr = cleaned.find("{"), cleaned.find("[")
         starts = [i for i in (start_obj, start_arr) if i >= 0]
@@ -78,7 +153,7 @@ def extract_json_blob(text: str) -> Any:
             raise
         start = min(starts)
         snippet = cleaned[start:]
-        return json.loads(snippet)
+        return _loads(snippet)
 
 
 def generate_text(
