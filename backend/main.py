@@ -83,7 +83,7 @@ class MemeBody(BaseModel):
     concept_title: str
     summary: str
     reimagine: bool = False
-    # When reimagine=True, pass the prior brief to skip Step 1 and reuse fallback_prompt.
+    # When reimagine=True: new meme template + captions; optional prior brief is used only to avoid repeating the same Imgflip template.
     brief: dict[str, Any] | None = None
 
 
@@ -361,21 +361,39 @@ def api_uploads(uid: str, settings: Settings = Depends(get_settings)) -> list[di
     ensure_demo_user()
     sb = supabase_client()
     ups = sb.table("uploads").select("*").eq("user_id", uid).order("created_at", desc=True).execute()
-    out: list[dict[str, Any]] = []
-    for u in ups.data or []:
-        cnt = (
+    upload_rows: list[dict[str, Any]] = list(ups.data or [])
+    upload_ids = [str(u["id"]) for u in upload_rows]
+
+    # Per upload: concept count + whether every row has non-empty raw_content (Focus Mode / verbatim text).
+    agg: dict[str, dict[str, int]] = {i: {"total": 0, "with_raw": 0} for i in upload_ids}
+    if upload_ids:
+        cons = (
             sb.table("concepts")
-            .select("id", count="exact")
-            .eq("upload_id", u["id"])
+            .select("upload_id, raw_content")
+            .in_("upload_id", upload_ids)
             .execute()
         )
-        n = int(cnt.count or 0)
+        for c in cons.data or []:
+            uid_row = str(c.get("upload_id", ""))
+            if uid_row not in agg:
+                continue
+            agg[uid_row]["total"] += 1
+            raw = c.get("raw_content")
+            if isinstance(raw, str) and raw.strip():
+                agg[uid_row]["with_raw"] += 1
+
+    out: list[dict[str, Any]] = []
+    for u in upload_rows:
+        uid_u = str(u["id"])
+        a = agg.get(uid_u, {"total": 0, "with_raw": 0})
+        n = a["total"]
         row = dict(u)
         row["concepts_count"] = n
+        row["has_raw_content"] = n > 0 and a["with_raw"] == n
         if u.get("course_id"):
             cr = (
                 sb.table("courses")
-                .select("code,name")
+                .select("code,name,color")
                 .eq("id", str(u["course_id"]))
                 .limit(1)
                 .execute()
@@ -383,6 +401,7 @@ def api_uploads(uid: str, settings: Settings = Depends(get_settings)) -> list[di
             if cr.data:
                 row["course_code"] = cr.data[0].get("code")
                 row["course_name"] = cr.data[0].get("name")
+                row["course_color"] = cr.data[0].get("color")
         out.append(row)
     return out
 

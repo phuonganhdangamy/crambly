@@ -1,8 +1,11 @@
 "use client";
 
 import type { LearnerMode } from "@crambly/types";
+import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { postPreferences, postStudyDna } from "@/lib/api";
 
 const MODES: { id: LearnerMode; label: string; hint: string }[] = [
@@ -58,35 +61,48 @@ export default function ModePage() {
   }
 
   return (
-    <div className="space-y-8">
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="space-y-8"
+    >
       <div>
-        <h1 className="text-3xl font-bold text-white">Learner mode</h1>
-        <p className="mt-2 text-slate-400">Pick how Crambly rewrites your material. This feeds the transformation agent.</p>
+        <p className="text-sm text-[var(--color-accent-cyan)]">Study DNA & pacing</p>
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">Learner mode</h1>
+        <p className="mt-2 text-[var(--color-text-secondary)]">
+          Pick how Crambly rewrites your material. This feeds the transformation agent.
+        </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {MODES.map((m) => (
-          <button
+        {MODES.map((m, i) => (
+          <motion.button
             key={m.id}
             type="button"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05, duration: 0.22 }}
             onClick={() => setMode(m.id)}
-            className={`rounded-2xl border px-4 py-4 text-left transition ${
-              mode === m.id ? "border-indigo-400 bg-indigo-500/10" : "border-slate-800 bg-slate-900/50 hover:border-slate-600"
+            className={`rounded-[var(--radius-lg)] border px-4 py-4 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-cyan)] ${
+              mode === m.id
+                ? "border-[var(--color-accent-cyan)] bg-[var(--color-accent-cyan)]/10 shadow-[var(--shadow-neon-cyan)]"
+                : "border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-tertiary)]"
             }`}
           >
-            <p className="font-semibold text-white">{m.label}</p>
-            <p className="mt-1 text-sm text-slate-400">{m.hint}</p>
-          </button>
+            <p className="font-semibold text-[var(--color-text-primary)]">{m.label}</p>
+            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{m.hint}</p>
+          </motion.button>
         ))}
       </div>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
+      <Card>
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="font-semibold text-white">Complexity dial</p>
-            <p className="text-sm text-slate-400">Expert ←→ ELI5</p>
+            <p className="font-semibold text-[var(--color-text-primary)]">Complexity dial</p>
+            <p className="text-sm text-[var(--color-text-secondary)]">Expert ←→ ELI5</p>
           </div>
-          <span className="text-indigo-300">{dial}%</span>
+          <span className="font-mono text-[var(--color-accent-cyan)]">{dial}%</span>
         </div>
         <input
           type="range"
@@ -94,46 +110,40 @@ export default function ModePage() {
           max={100}
           value={dial}
           onChange={(e) => setDial(Number(e.target.value))}
-          className="mt-4 w-full accent-indigo-500"
+          className="mt-4 h-2 w-full cursor-pointer appearance-none rounded-full bg-[var(--color-bg-tertiary)] accent-[var(--color-accent-cyan)]"
+          style={{ accentColor: "var(--color-accent-cyan)" }}
         />
-      </div>
+      </Card>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
-        <p className="font-semibold text-white">Optional: Study DNA samples</p>
-        <p className="mt-1 text-sm text-slate-400">
+      <Card>
+        <p className="font-semibold text-[var(--color-text-primary)]">Optional: Study DNA samples</p>
+        <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
           Paste a paragraph of your own notes so the transformation agent can mimic tone (few-shot).
         </p>
         <textarea
           value={dnaNotes}
           onChange={(e) => setDnaNotes(e.target.value)}
           rows={4}
-          className="mt-3 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+          className="mt-3 w-full rounded-[var(--radius-md)] border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-cyan)] focus:outline-none focus:shadow-[var(--shadow-neon-cyan)]"
           placeholder="Your voice, your shorthand, your examples…"
         />
-        <button
-          type="button"
-          disabled={dnaBusy}
-          onClick={() => void saveDna()}
-          className="mt-3 rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
-        >
-          {dnaBusy ? "Analyzing…" : "Update Study DNA"}
-        </button>
-      </div>
+        <Button type="button" variant="secondary" className="mt-3" disabled={dnaBusy} loading={dnaBusy} onClick={() => void saveDna()}>
+          Update Study DNA
+        </Button>
+      </Card>
 
       <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => void save()}
-          className="rounded-xl bg-indigo-500 px-6 py-3 font-semibold text-white hover:bg-indigo-400 disabled:opacity-50"
+        <Button type="button" variant="primary" disabled={saving} loading={saving} onClick={() => void save()}>
+          Save selection
+        </Button>
+        <Link
+          href="/library"
+          className="inline-flex min-h-[40px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-border-default)] px-6 py-3 font-semibold text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-tertiary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-cyan)]"
         >
-          {saving ? "Saving…" : "Save selection"}
-        </button>
-        <Link href="/library" className="rounded-xl border border-slate-700 px-6 py-3 font-semibold text-slate-200 hover:bg-slate-800">
           Go to library
         </Link>
       </div>
-      {msg && <p className="text-sm text-slate-300">{msg}</p>}
-    </div>
+      {msg && <p className="text-sm text-[var(--color-text-secondary)]">{msg}</p>}
+    </motion.div>
   );
 }

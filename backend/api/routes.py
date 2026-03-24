@@ -385,7 +385,7 @@ def post_meme_regenerate(
     sb = supabase_client()
     up = (
         sb.table("uploads")
-        .select("id")
+        .select("id,meme_recap")
         .eq("id", uid)
         .eq("user_id", user_id)
         .limit(1)
@@ -393,6 +393,13 @@ def post_meme_regenerate(
     )
     if not up.data:
         raise HTTPException(404, "upload not found")
+    row0 = up.data[0]
+    prior_brief: dict[str, Any] | None = None
+    recap0 = row0.get("meme_recap")
+    if isinstance(recap0, dict):
+        b = recap0.get("brief")
+        if isinstance(b, dict):
+            prior_brief = b
     try:
         prepare_study_deck_row(uid, user_id, reset=False)
     except ValueError as e:
@@ -404,7 +411,7 @@ def post_meme_regenerate(
             concept_title=title,
             summary=summary,
             force_image=True,
-            prior_brief=None,
+            prior_brief=prior_brief,
             settings=settings,
         )
         url = result.get("image_url")

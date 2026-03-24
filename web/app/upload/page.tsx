@@ -1,9 +1,15 @@
 "use client";
 
+import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
 import { fetchCourses, postCourse, uploadFile, type CourseRow } from "@/lib/api";
+
+const PRESET_COLORS = ["#00d9ff", "#7ee787", "#6366f1", "#a371f7", "#f778ba", "#ff7b35", "#58a6ff", "#3fb950"];
 
 function detectType(file: File): "pdf" | "image" | "audio" | "text" {
   const n = file.name.toLowerCase();
@@ -13,6 +19,9 @@ function detectType(file: File): "pdf" | "image" | "audio" | "text" {
   if (n.endsWith(".txt") || t === "text/plain") return "text";
   return "pdf";
 }
+
+const selectClass =
+  "mt-2 max-w-md w-full flex-1 rounded-[var(--radius-md)] border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent-cyan)] focus:outline-none focus:shadow-[var(--shadow-neon-cyan)] min-h-[44px]";
 
 export default function UploadPage() {
   const router = useRouter();
@@ -25,7 +34,7 @@ export default function UploadPage() {
   const [newModal, setNewModal] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCode, setNewCode] = useState("");
-  const [newColor, setNewColor] = useState("#6366f1");
+  const [newColor, setNewColor] = useState(PRESET_COLORS[0]!);
 
   const createCourse = useMutation({
     mutationFn: () => postCourse({ name: newName.trim(), code: newCode.trim(), color: newColor }),
@@ -35,7 +44,7 @@ export default function UploadPage() {
       setNewModal(false);
       setNewName("");
       setNewCode("");
-      setNewColor("#6366f1");
+      setNewColor(PRESET_COLORS[0]!);
     },
   });
 
@@ -60,14 +69,20 @@ export default function UploadPage() {
   );
 
   return (
-    <div className="space-y-6">
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="space-y-6"
+    >
       <div>
-        <h1 className="text-3xl font-bold text-white">Upload academic content</h1>
-        <p className="mt-2 text-slate-400">PDF, image, audio, or plain text — sent to the ingestion agent.</p>
+        <p className="text-sm text-[var(--color-accent-cyan)]">Ingestion</p>
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">Upload academic content</h1>
+        <p className="mt-2 text-[var(--color-text-secondary)]">PDF, image, audio, or plain text — sent to the ingestion agent.</p>
       </div>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
-        <label className="text-sm font-medium text-slate-300" htmlFor="course-select">
+      <Card>
+        <label className="text-sm font-medium text-[var(--color-text-secondary)]" htmlFor="course-select">
           Course (optional)
         </label>
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -82,7 +97,7 @@ export default function UploadPage() {
               }
               setCourseId(v);
             }}
-            className="max-w-md flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+            className={selectClass}
           >
             <option value="">No course</option>
             {(coursesQ.data ?? []).map((c) => (
@@ -93,11 +108,11 @@ export default function UploadPage() {
             <option value="__new__">New course…</option>
           </select>
         </div>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-[var(--color-text-muted)]">
           Assigning a course links this lecture in the course hub and scopes Digital Twin updates from quizzes on this
           material.
         </p>
-      </div>
+      </Card>
 
       <div
         onDragOver={(e) => {
@@ -110,78 +125,95 @@ export default function UploadPage() {
           setDrag(false);
           void onFiles(e.dataTransfer.files);
         }}
-        className={`flex min-h-[220px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 text-center transition ${
-          drag ? "border-indigo-400 bg-indigo-500/10" : "border-slate-700 bg-slate-900/50"
+        className={`flex min-h-[220px] cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border-2 border-dashed px-6 text-center transition-colors ${
+          drag
+            ? "border-[var(--color-accent-cyan)] bg-[var(--color-accent-cyan)]/10 shadow-[var(--shadow-neon-cyan)]"
+            : "border-[var(--color-border-default)] bg-[var(--color-bg-secondary)]"
         }`}
       >
-        <p className="text-slate-200">{busy ? "Processing with Gemini…" : "Drag & drop a file here"}</p>
-        <p className="mt-2 text-sm text-slate-500">or</p>
-        <label className="mt-4 inline-flex cursor-pointer rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+        <p className="text-[var(--color-text-primary)]">{busy ? "Processing with Gemini…" : "Drag & drop a file here"}</p>
+        <p className="mt-2 text-sm text-[var(--color-text-muted)]">or</p>
+        <label className="mt-4 inline-flex min-h-[44px] cursor-pointer items-center rounded-[var(--radius-md)] bg-[var(--color-bg-tertiary)] px-4 py-2 text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-elevated)]">
           Browse files
-          <input
-            type="file"
-            className="hidden"
-            disabled={busy}
-            onChange={(e) => void onFiles(e.target.files)}
-          />
+          <input type="file" className="hidden" disabled={busy} onChange={(e) => void onFiles(e.target.files)} />
         </label>
       </div>
 
       {busy && (
-        <div className="flex items-center gap-3 text-slate-300">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
+        <div className="flex items-center gap-3 text-[var(--color-text-secondary)]">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-accent-cyan)] border-t-transparent" />
           Extracting concepts and embeddings…
         </div>
       )}
-      {error && <p className="text-sm text-rose-400">{error}</p>}
+      {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
 
-      {newModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6">
-            <h3 className="text-lg font-semibold text-white">New course</h3>
-            <div className="mt-4 space-y-3">
-              <input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Course name"
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
-              />
-              <input
-                value={newCode}
-                onChange={(e) => setNewCode(e.target.value)}
-                placeholder="Code e.g. STAB57"
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-white"
-              />
-              <input
-                type="color"
-                value={newColor}
-                onChange={(e) => setNewColor(e.target.value)}
-                className="h-10 w-full max-w-[5rem] cursor-pointer rounded border border-slate-600"
-              />
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setNewModal(false);
-                  setCourseId("");
-                }}
-                className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={createCourse.isPending || !newName.trim() || !newCode.trim()}
-                onClick={() => createCourse.mutate()}
-                className="rounded-lg bg-indigo-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                {createCourse.isPending ? "Saving…" : "Create & select"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <AnimatePresence>
+        {newModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4"
+            onClick={() => setNewModal(false)}
+            role="presentation"
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 320 }}
+              className="w-full max-w-md rounded-t-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6 sm:rounded-[var(--radius-lg)]"
+              role="dialog"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">New course</h3>
+              <div className="mt-4 space-y-3">
+                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Course name" />
+                <Input
+                  value={newCode}
+                  onChange={(e) => setNewCode(e.target.value)}
+                  placeholder="Code e.g. STAB57"
+                  className="font-mono"
+                />
+                <p className="text-xs text-[var(--color-text-muted)]">Accent</p>
+                <div className="flex flex-wrap gap-2">
+                  {PRESET_COLORS.map((hex) => (
+                    <button
+                      key={hex}
+                      type="button"
+                      aria-label={`Color ${hex}`}
+                      className={`h-9 w-9 rounded-full border-2 ${newColor === hex ? "border-[var(--color-accent-cyan)]" : "border-transparent"}`}
+                      style={{ backgroundColor: hex }}
+                      onClick={() => setNewColor(hex)}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setNewModal(false);
+                    setCourseId("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={createCourse.isPending || !newName.trim() || !newCode.trim()}
+                  loading={createCourse.isPending}
+                  onClick={() => createCourse.mutate()}
+                >
+                  Create & select
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }

@@ -9,28 +9,50 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import time
 from typing import Any
 from uuid import uuid4
+
+import google.generativeai as genai
+from google.api_core import exceptions as google_api_exceptions
 
 from config import get_settings
 from db import ensure_demo_user, supabase_client, vector_to_pg
 from gemini_client import (
+    configure_gemini,
     embed_texts_optional,
     extract_json_blob,
-    generate_multimodal,
     generate_text,
 )
 from redis_util import enqueue_ingestion
 
 logger = logging.getLogger(__name__)
 
-INGESTION_PROMPT = """You are an academic content parser. Extract all key concepts from the following
-content. For each concept return: title, 2-sentence summary, exam_importance
-score from 1 (low) to 5 (critical), and has_math (boolean) if the concept involves equations,
-symbols, or quantitative STEM notation.
-Return as JSON array with objects:
-{"title": string, "summary": string, "exam_importance": number, "has_math": boolean}.
-Do not include markdown. Only the JSON array."""
+# Matches web/lib/models.ts MODELS.ingestion (keep in sync conceptually).
+INGESTION_MODEL_ID = "gemini-2.5-flash"
+
+INGESTION_PROMPT = """You are an academic content parser. Extract all sections from the following content.
+For each section return:
+{
+  "title": string,
+  "raw_content": string,
+  "summary": string,
+  "exam_importance": number,
+  "has_math": boolean,
+  "has_code": boolean,
+  "key_terms": string[]
+}
+
+Rules:
+- raw_content: verbatim paragraph text from the source — do not paraphrase.
+- summary: exactly two sentences summarizing the section.
+- exam_importance: integer 1 (low) to 5 (critical).
+- has_math: true if the section contains formulas or mathematical notation.
+- has_code: true if the section contains code snippets.
+- key_terms: important technical terms in this section.
+
+Return as a JSON array only. Do not add commentary outside the JSON.
+For raw_content: if the source contains LaTeX math expressions, wrap them in $...$ for inline and $$...$$ for block expressions."""
 
 GRAPH_PROMPT = """You map relationships between course concepts for an interactive graph (max 10 nodes).
 
@@ -71,15 +93,46 @@ def _normalize_concepts(raw: Any) -> list[dict[str, Any]]:
         if title and summary:
             hm = item.get("has_math")
             has_math = bool(hm) if hm is not None else False
+            hc = item.get("has_code")
+            has_code = bool(hc) if hc is not None else False
+            raw_content = str(item.get("raw_content", "")).strip()
+            if not raw_content:
+                raw_content = summary
             out.append(
                 {
                     "title": title,
                     "summary": summary,
+                    "raw_content": raw_content,
                     "exam_importance": imp,
                     "has_math": has_math,
+                    "has_code": has_code,
                 }
             )
     return out
+
+
+def _ingest_multimodal(prompt: str, *, mime_type: str, data: bytes, temperature: float = 0.25) -> str:
+    """Ingestion-only multimodal call on MODELS.ingestion (gemini-2.5-flash)."""
+    configure_gemini()
+    model = genai.GenerativeModel(INGESTION_MODEL_ID)
+    part = {"mime_type": mime_type, "data": data}
+    last_err: Exception | None = None
+    for attempt in range(4):
+        try:
+            resp = model.generate_content(
+                [prompt, part],
+                generation_config=genai.types.GenerationConfig(temperature=temperature),
+            )
+            return (resp.text or "").strip()
+        except google_api_exceptions.ResourceExhausted as e:
+            last_err = e
+            if attempt < 3:
+                time.sleep(min(30.0, 2.0 * (attempt + 1)))
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            if attempt < 3:
+                time.sleep(0.8 * (2**attempt))
+    raise RuntimeError("Ingestion multimodal failed after retries") from last_err
 
 
 def _fallback_concept_graph(inserted_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -246,7 +299,7 @@ def run_ingestion(
             mime = "audio/mpeg"
 
     try:
-        raw_text = generate_multimodal(
+        raw_text = _ingest_multimodal(
             INGESTION_PROMPT,
             mime_type=mime,
             data=file_bytes,
@@ -273,6 +326,8 @@ def run_ingestion(
             "summary": c["summary"],
             "exam_importance": c["exam_importance"],
             "has_math": bool(c.get("has_math", False)),
+            "has_code": bool(c.get("has_code", False)),
+            "raw_content": c.get("raw_content"),
         }
         row_out: dict[str, Any] = dict(base)
         try:

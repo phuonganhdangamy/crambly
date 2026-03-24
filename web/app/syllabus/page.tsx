@@ -1,10 +1,14 @@
 "use client";
 
+import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
 import { fetchCourses, postCourse, postSyllabus, type CourseRow } from "@/lib/api";
 
-type Card = {
+type ParsedAssessment = {
   name: string;
   due_date: string;
   grade_weight: number;
@@ -13,23 +17,28 @@ type Card = {
   tier: string;
 };
 
+const PRESET_COLORS = ["#00d9ff", "#7ee787", "#6366f1", "#a371f7", "#f778ba", "#ff7b35", "#58a6ff", "#3fb950"];
+
 function tierStyles(tier: string) {
-  if (tier === "high") return "border-rose-500/50 bg-rose-500/10";
-  if (tier === "medium") return "border-amber-500/50 bg-amber-500/10";
-  return "border-emerald-500/40 bg-emerald-500/10";
+  if (tier === "high") return "border-[var(--color-danger)]/45 bg-[var(--color-danger)]/10";
+  if (tier === "medium") return "border-[var(--color-warning)]/45 bg-[var(--color-warning)]/10";
+  return "border-[var(--color-success)]/40 bg-[var(--color-success)]/10";
 }
+
+const selectClass =
+  "mt-2 max-w-md block w-full rounded-[var(--radius-md)] border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent-cyan)] focus:outline-none focus:shadow-[var(--shadow-neon-cyan)] min-h-[44px]";
 
 export default function SyllabusPage() {
   const qc = useQueryClient();
   const coursesQ = useQuery({ queryKey: ["courses"], queryFn: fetchCourses });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cards, setCards] = useState<Card[] | null>(null);
+  const [cards, setCards] = useState<ParsedAssessment[] | null>(null);
   const [courseId, setCourseId] = useState<string>("");
   const [newModal, setNewModal] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCode, setNewCode] = useState("");
-  const [newColor, setNewColor] = useState("#6366f1");
+  const [newColor, setNewColor] = useState(PRESET_COLORS[0]!);
 
   const createCourse = useMutation({
     mutationFn: () => postCourse({ name: newName.trim(), code: newCode.trim(), color: newColor }),
@@ -39,7 +48,7 @@ export default function SyllabusPage() {
       setNewModal(false);
       setNewName("");
       setNewCode("");
-      setNewColor("#6366f1");
+      setNewColor(PRESET_COLORS[0]!);
     },
   });
 
@@ -61,17 +70,23 @@ export default function SyllabusPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="space-y-6"
+    >
       <div>
-        <h1 className="text-3xl font-bold text-white">Syllabus → deadlines</h1>
-        <p className="mt-2 text-slate-400">
+        <p className="text-sm text-[var(--color-accent-cyan)]">Deadline agent</p>
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">Syllabus → deadlines</h1>
+        <p className="mt-2 text-[var(--color-text-secondary)]">
           Upload a syllabus PDF. The deadline agent extracts assessments and ranks them. Link a course so deadlines stay
           scoped to that class.
         </p>
       </div>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
-        <label className="text-sm font-medium text-slate-300" htmlFor="syllabus-course">
+      <Card>
+        <label className="text-sm font-medium text-[var(--color-text-secondary)]" htmlFor="syllabus-course">
           Course
         </label>
         <select
@@ -85,7 +100,7 @@ export default function SyllabusPage() {
             }
             setCourseId(v);
           }}
-          className="mt-2 max-w-md block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+          className={selectClass}
         >
           <option value="">No course (legacy — replaces only unscoped assessments)</option>
           {(coursesQ.data ?? []).map((c) => (
@@ -95,77 +110,91 @@ export default function SyllabusPage() {
           ))}
           <option value="__new__">New course…</option>
         </select>
-      </div>
+      </Card>
 
-      <label className="inline-flex cursor-pointer rounded-xl bg-slate-800 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700">
+      <label className="inline-flex min-h-[44px] cursor-pointer items-center rounded-[var(--radius-md)] bg-[var(--color-accent-cyan)] px-5 py-3 text-sm font-semibold text-[#0d1117] shadow-[var(--shadow-card)] transition hover:shadow-[var(--shadow-neon-cyan)]">
         {busy ? "Parsing…" : "Upload syllabus PDF"}
         <input type="file" accept=".pdf,application/pdf" className="hidden" disabled={busy} onChange={(e) => void onFile(e.target.files)} />
       </label>
 
-      {error && <p className="text-sm text-rose-400">{error}</p>}
+      {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
 
       <div className="grid gap-4">
         {(cards ?? []).map((c) => (
-          <div key={`${c.name}-${c.due_date}`} className={`rounded-2xl border p-5 ${tierStyles(c.tier)}`}>
+          <Card key={`${c.name}-${c.due_date}`} className={tierStyles(c.tier)}>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-xl font-semibold text-white">{c.name}</h2>
-              <span className="font-mono text-sm text-slate-200">score {c.priority_score.toFixed(3)}</span>
+              <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">{c.name}</h2>
+              <span className="font-mono text-sm text-[var(--color-text-secondary)]">score {c.priority_score.toFixed(3)}</span>
             </div>
-            <p className="mt-2 text-sm text-slate-200">
-              Due <span className="font-medium text-white">{c.due_date}</span> · Weight{" "}
-              <span className="font-medium text-white">{(c.grade_weight * 100).toFixed(0)}%</span>
+            <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+              Due <span className="font-medium text-[var(--color-text-primary)]">{c.due_date}</span> · Weight{" "}
+              <span className="font-medium text-[var(--color-text-primary)]">{(c.grade_weight * 100).toFixed(0)}%</span>
             </p>
-            <p className="mt-3 text-slate-100">{c.message}</p>
-          </div>
+            <p className="mt-3 text-[var(--color-text-primary)]">{c.message}</p>
+          </Card>
         ))}
       </div>
 
-      {newModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6">
-            <h3 className="text-lg font-semibold text-white">New course</h3>
-            <div className="mt-4 space-y-3">
-              <input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Course name"
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
-              />
-              <input
-                value={newCode}
-                onChange={(e) => setNewCode(e.target.value)}
-                placeholder="Code e.g. STAB57"
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-white"
-              />
-              <input
-                type="color"
-                value={newColor}
-                onChange={(e) => setNewColor(e.target.value)}
-                className="h-10 w-full max-w-[5rem] cursor-pointer rounded border border-slate-600"
-              />
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setNewModal(false);
-                }}
-                className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={createCourse.isPending || !newName.trim() || !newCode.trim()}
-                onClick={() => createCourse.mutate()}
-                className="rounded-lg bg-indigo-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                {createCourse.isPending ? "Saving…" : "Create & select"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <AnimatePresence>
+        {newModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center sm:p-4"
+            onClick={() => setNewModal(false)}
+            role="presentation"
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 320 }}
+              className="w-full max-w-md rounded-t-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6 sm:rounded-[var(--radius-lg)]"
+              role="dialog"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">New course</h3>
+              <div className="mt-4 space-y-3">
+                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Course name" />
+                <Input
+                  value={newCode}
+                  onChange={(e) => setNewCode(e.target.value)}
+                  placeholder="Code e.g. STAB57"
+                  className="font-mono"
+                />
+                <p className="text-xs text-[var(--color-text-muted)]">Accent</p>
+                <div className="flex flex-wrap gap-2">
+                  {PRESET_COLORS.map((hex) => (
+                    <button
+                      key={hex}
+                      type="button"
+                      aria-label={`Color ${hex}`}
+                      className={`h-9 w-9 rounded-full border-2 ${newColor === hex ? "border-[var(--color-accent-cyan)]" : "border-transparent"}`}
+                      style={{ backgroundColor: hex }}
+                      onClick={() => setNewColor(hex)}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => setNewModal(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={createCourse.isPending || !newName.trim() || !newCode.trim()}
+                  loading={createCourse.isPending}
+                  onClick={() => createCourse.mutate()}
+                >
+                  Create & select
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }

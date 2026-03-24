@@ -132,6 +132,33 @@ An optional, fully on-device focus assistant.
 
 ---
 
+### 7. Desktop Study Hub, Games & Courses
+
+Beyond upload and transform, the **Next.js** desktop app includes a full **per-lecture study** experience and optional **course** organization.
+
+**Library → Study (`/study/[uploadId]`)**  
+Open any upload from the library to see a STEM-oriented layout: interactive **concept graph** (`ConceptGraphView`), **math-aware** summaries (`MathRichText`), **worked examples** (`WorkedExampleCard`), and **formula annotations** with term callouts (`FormulaAnnotationBlock`). Learner mode and the complexity dial from local settings apply to transforms on this page.
+
+**Study deck (background pipeline)**  
+A **study deck** row per upload drives async tasks (meme recap, TTS audio, word bank, puzzles, quiz burst, YouTube ideas). While tasks run, the UI uses **Supabase Realtime** on `study_deck` so new assets can appear without a manual refresh. Users can trigger deck generation, regenerate pieces (e.g. meme), and delete a deck row to clear cached games/media while keeping the underlying upload and concepts.
+
+**Game & media components (`web/components/games/`)**
+
+| Component | Role |
+|---|---|
+| `MemeCard` | Displays the generated meme recap for the lecture |
+| `AudioPlayer` | Plays the TTS / audio walkthrough clip |
+| `YouTubeSuggestions` | Surfaces curated related-video ideas from the deck |
+| `Wordle` | Word-bank style game tied to key terms from the material |
+| `PuzzleMatch` | Match concepts to definitions (pairs puzzle) |
+| `QuizBurst` | Short multiple-choice burst for the upload |
+| `GameShimmer` | Skeleton / loading state while deck slices are still generating |
+
+**Courses**  
+Create courses (name, course code, color), attach uploads, and use the **course hub** (`/courses`, `/courses/[courseId]`) to browse lectures in context. The hub reuses the same study-deck widgets per selected lecture and keeps **Digital Twin** signals (e.g. confusion / weak topics) organized **per course** where the schema supports it.
+
+---
+
 ## Complexity Dial
 
 A real-time slider in the UI that adjusts explanation complexity from **Expert** to **ELI5** while keeping all technical keywords highlighted in their original English — so exam accuracy is never sacrificed.
@@ -143,7 +170,7 @@ A real-time slider in the UI that adjusts explanation complexity from **Expert**
 ### Frontend
 | Layer | Technology | Why |
 |---|---|---|
-| Desktop web | Next.js + Tailwind CSS + TypeScript | Fast, polished, cross-platform MVP |
+| Desktop web | Next.js + Tailwind CSS + TypeScript | Library, study hub (STEM graph + `games/` deck widgets), course hub, TanStack Query, Supabase client + Realtime |
 | Mobile | React Native with Expo | Efficient reuse of JS logic |
 
 ### Backend
@@ -238,11 +265,15 @@ Step 2 — AI agents process content
 Step 3 — Student picks mode
   └── ADHD / visual / global scholar / audio-first / exam-cram
 
-Step 4 — Mobile delivers adaptive learning
+Step 4 — Desktop library & study (optional)
+  └── Open an upload: concept graph, summaries, study deck (meme, audio, Wordle, puzzle, quiz burst, YouTube ideas)
+  └── Organize uploads into courses and review from the course hub
+
+Step 5 — Mobile delivers adaptive learning
   └── Daily TLDR Pulse, quiz bursts, audio walkthrough, meme recap, voice tutor
 
-Step 5 — Digital Twin improves over time
-  └── Notices patterns → adapts tomorrow's plan → Study DNA refines explanations
+Step 6 — Digital Twin improves over time
+  └── Notices patterns → adapts tomorrow's plan → Study DNA refines explanations (including per-course signals on desktop)
 ```
 
 ---
@@ -296,6 +327,10 @@ REDIS_URL=
    - `supabase/migrations/20250323000000_storage_uploads_bucket.sql` (creates the **`uploads`** bucket)
    - `supabase/migrations/20250324000000_concepts_embedding_3072_optional.sql` (only if you use 3072-dim embeddings)
    - `supabase/migrations/20250325000000_concepts_stem_visual.sql` (**`graph_data`**, **`has_math`** on concepts — required for the STEM study graph)
+   - `supabase/migrations/20250326000000_uploads_meme_recap.sql` (meme recap storage on uploads)
+   - `supabase/migrations/20250327000000_uploads_study_transform_cache.sql` (cached study transform JSON)
+   - `supabase/migrations/20250328000000_study_deck.sql` (**`study_deck`** table + Realtime — required for desktop games / deck pipeline)
+   - `supabase/migrations/20250329000000_courses.sql` (**`courses`** and upload ↔ course association)
 2. **Storage →** confirm bucket **`uploads`** exists (or match `SUPABASE_UPLOAD_BUCKET` in `.env`).
 
 ### 4. Backend (FastAPI)
@@ -391,7 +426,7 @@ Then in `.env`: `REDIS_URL=redis://localhost:6379/0` and restart the backend.
 ## MVP Scope (Submission)
 
 **Must-have:**
-- Desktop upload (PDF, slides, syllabus)
+- Desktop upload (PDF, slides, syllabus), personal library, and per-upload **study** view with concept graph
 - Learner mode selection
 - Gemini-powered concept extraction and transformation
 - TLDR Pulse (daily digest)
@@ -400,6 +435,8 @@ Then in `.env`: `REDIS_URL=redis://localhost:6379/0` and restart the backend.
 - Global Scholar mode (complexity dial)
 
 **Showcase / demo features:**
+- Desktop **study** page: concept graph, worked examples, formula annotations, **study deck** with games (`Wordle`, `PuzzleMatch`, `QuizBurst`, meme, audio, YouTube suggestions)
+- **Courses** hub: group uploads, per-course study view + deck widgets
 - Study DNA (few-shot from user notes)
 - Explain Like Me
 - Meme recap generator

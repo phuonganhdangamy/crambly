@@ -1,0 +1,66 @@
+:root {
+  /* Base surfaces */
+  --color-bg-primary: #0d1117; /* deep navy — main background */
+  --color-bg-secondary: #161b22; /* slightly lighter — cards */
+  --color-bg-tertiary: #21262d; /* hover states, inputs */
+  --color-bg-elevated: #2d333b; /* modals, dropdowns */
+
+  /* Neon accents */
+  --color-accent-cyan: #00d9ff; /* primary CTA, active states */
+  --color-accent-lime: #7ee787; /* success, completed states */
+  --color-accent-orange: #ff7b35; /* warnings, high priority */
+  --color-accent-purple: #a371f7; /* secondary accent, quiz */
+  --color-accent-pink: #f778ba; /* meme, fun features */
+
+  /* Text */
+  --color-text-primary: #e6edf3;
+  --color-text-secondary: #8b949e;
+  --color-text-muted: #484f58;
+
+  /* Borders */
+  --color-border-default: #30363d;
+  --color-border-active: #00d9ff33; /* cyan with opacity */
+
+  /* Semantic */
+  --color-success: #7ee787;
+  --color-warning: #ff7b35;
+  --color-danger: #ff6b6b;
+  --color-info: #00d9ff;
+
+  /* Typography */
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --leading-relaxed: 1.75; /* increased line spacing for neurodiversity */
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* Shadows */
+  --shadow-neon-cyan: 0 0 12px #00d9ff33;
+  --shadow-neon-lime: 0 0 12px #7ee78733;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+  --transition-slow: 400ms ease;
+}
+
+/* Calming Mode — applied to <html> when toggle is active */
+html.calming-mode {
+  --color-accent-cyan: #5b8db8;
+  --color-accent-lime: #5a8a60;
+  --color-accent-orange: #a0714f;
+  --color-accent-purple: #7b6ba8;
+  --color-accent-pink: #a07890;
+  --shadow-neon-cyan: none;
+  --shadow-neon-lime: none;
+}
+
+html.calming-mode * {
+  animation-duration: 0ms !important;
+  transition-duration: 100ms !important;
+}

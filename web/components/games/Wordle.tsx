@@ -37,18 +37,24 @@ function cellClass(s: LetterState): string {
   return "border-slate-700 bg-slate-900/80 text-slate-500";
 }
 
-export function Wordle(props: {
+export function Wordle({
+  wordBank,
+  conceptHints,
+  onWin,
+}: {
   wordBank: string[];
   conceptHints: { term: string; definition: string }[];
+  /** Fires once when the player solves the puzzle (for celebratory UI only). */
+  onWin?: () => void;
 }) {
   const playable = useMemo(() => {
     const set = new Set<string>();
-    for (const w of props.wordBank) {
+    for (const w of wordBank) {
       const x = w.toLowerCase().replace(/[^a-z]/g, "");
       if (x.length === 5) set.add(x);
     }
     return Array.from(set);
-  }, [props.wordBank]);
+  }, [wordBank]);
 
   const [target, setTarget] = useState(() => "");
   const [guesses, setGuesses] = useState<string[]>([]);
@@ -73,12 +79,12 @@ export function Wordle(props: {
   const definitionFor = useCallback(
     (word: string) => {
       const low = word.toLowerCase();
-      const hit = props.conceptHints.find(
+      const hit = conceptHints.find(
         (h) => h.term.toLowerCase() === low || h.term.toLowerCase().includes(low) || low.includes(h.term.toLowerCase()),
       );
       return hit?.definition ?? "Definition from your materials — keep this term in mind for the exam.";
     },
-    [props.conceptHints],
+    [conceptHints],
   );
 
   const submit = useCallback(() => {
@@ -91,10 +97,11 @@ export function Wordle(props: {
     if (g === target) {
       setStatus("won");
       setCelebrate(true);
+      onWin?.();
       return;
     }
     if (next.length >= ROWS) setStatus("lost");
-  }, [current, guesses, playable, status, target]);
+  }, [current, guesses, onWin, playable, status, target]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

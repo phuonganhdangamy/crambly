@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import base64
 import logging
+import random
+from html import escape as html_escape
 from typing import Any
 
 import httpx
@@ -50,12 +52,68 @@ Summary: {summary}
 JSON only."""
 
 
-def _coerce_brief(raw: Any, *, concept_title: str) -> dict[str, str]:
+def _fallback_brief(
+    *,
+    concept_title: str,
+    summary: str,
+    forbid_template: str | None = None,
+) -> dict[str, str]:
+    """Deterministic local fallback when Gemini text briefing is temporarily unavailable."""
+    ft = (forbid_template or "").strip().lower().replace(" ", "_")
+    choices = [k for k in IMGFLIP_TEMPLATE_IDS.keys() if k != ft] if ft else list(IMGFLIP_TEMPLATE_IDS.keys())
+    template = random.choice(choices) if choices else "custom"
+    title = " ".join(concept_title.split())[:80] or "Key concept"
+    snippet = " ".join(summary.split())[:140] if summary.strip() else "Focus on the key idea and avoid common confusion."
+    top = f"When the exam asks about {title[:44]}"
+    bottom = snippet[:110] if snippet else f"{title} in plain English"
+    fallback_prompt = (
+        "A highly detailed meme-style illustration of a student in a lecture hall realizing "
+        f"the concept '{title}' with bold impact font text saying '{top}' and '{bottom}'."
+    )
+    return {
+        "template": template,
+        "top_text": top,
+        "bottom_text": bottom,
+        "fallback_prompt": fallback_prompt[:2000],
+    }
+
+
+def _fallback_svg_meme_bytes(*, top_text: str, bottom_text: str) -> tuple[bytes, str]:
+    """Generate a simple local meme image so regenerate never hard-fails."""
+    top = html_escape((top_text or "Study smarter").strip())[:120]
+    bottom = html_escape((bottom_text or "Key idea, remembered.").strip())[:140]
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#0f172a"/>
+    <stop offset="100%" stop-color="#111827"/>
+  </linearGradient>
+</defs>
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<rect x="40" y="40" width="944" height="944" rx="24" fill="none" stroke="#22d3ee" stroke-opacity="0.35" stroke-width="3"/>
+<text x="512" y="140" text-anchor="middle" fill="#f8fafc" font-family="Impact, Arial Black, sans-serif" font-size="64">{top}</text>
+<text x="512" y="916" text-anchor="middle" fill="#f8fafc" font-family="Impact, Arial Black, sans-serif" font-size="52">{bottom}</text>
+<text x="512" y="525" text-anchor="middle" fill="#93c5fd" font-family="Inter, Arial, sans-serif" font-size="40">Crambly fallback meme</text>
+</svg>"""
+    return svg.encode("utf-8"), "image/svg+xml"
+
+
+def _coerce_brief(
+    raw: Any,
+    *,
+    concept_title: str,
+    forbid_template: str | None = None,
+) -> dict[str, str]:
     if not isinstance(raw, dict):
         raise ValueError("meme brief is not a JSON object")
     template = str(raw.get("template") or "custom").strip().lower().replace(" ", "_")
     if template not in ALLOWED_TEMPLATES:
         template = "custom"
+    ft = (forbid_template or "").strip().lower().replace(" ", "_")
+    if ft and template == ft and ft in IMGFLIP_TEMPLATE_IDS:
+        alts = [k for k in IMGFLIP_TEMPLATE_IDS if k != ft]
+        if alts:
+            template = random.choice(alts)
     top = str(raw.get("top_text") or "")[:200]
     bottom = str(raw.get("bottom_text") or "")[:200]
     fallback = str(raw.get("fallback_prompt") or "").strip()
@@ -74,15 +132,36 @@ def _coerce_brief(raw: Any, *, concept_title: str) -> dict[str, str]:
     }
 
 
-def build_meme_brief(*, concept_title: str, summary: str) -> dict[str, str]:
+def build_meme_brief(
+    *,
+    concept_title: str,
+    summary: str,
+    forbid_template: str | None = None,
+    temperature: float | None = None,
+) -> dict[str, str]:
     prompt = MEME_BRIEF_PROMPT.format(concept_title=concept_title, summary=summary)
-    raw_text = generate_text(
-        prompt + "\n\nRespond with valid JSON only. No markdown, no commentary.",
-        temperature=0.85,
-    )
-    data = extract_json_blob(raw_text)
-    brief = _coerce_brief(data, concept_title=concept_title)
-    return brief
+    ft = (forbid_template or "").strip().lower().replace(" ", "_")
+    if ft and ft in ALLOWED_TEMPLATES and ft != "custom":
+        prompt += (
+            f'\n\nRegenerate constraint: do NOT use the "{ft}" meme template again. '
+            "Pick a different template from the allowed list and write fresh top/bottom text for it."
+        )
+    temp = 0.95 if ft else (temperature if temperature is not None else 0.85)
+    try:
+        raw_text = generate_text(
+            prompt + "\n\nRespond with valid JSON only. No markdown, no commentary.",
+            temperature=temp,
+        )
+        data = extract_json_blob(raw_text)
+        brief = _coerce_brief(data, concept_title=concept_title, forbid_template=ft or None)
+        return brief
+    except Exception:  # noqa: BLE001
+        logger.warning("Gemini meme brief generation failed; using local fallback brief", exc_info=True)
+        return _fallback_brief(
+            concept_title=concept_title,
+            summary=summary,
+            forbid_template=ft or None,
+        )
 
 
 def caption_imgflip(
@@ -121,15 +200,6 @@ def caption_imgflip(
     return str(url) if url else None
 
 
-def _brief_from_client_payload(raw: dict[str, Any] | None, *, concept_title: str) -> dict[str, str] | None:
-    if not raw or not isinstance(raw, dict):
-        return None
-    try:
-        return _coerce_brief(raw, concept_title=concept_title)
-    except ValueError:
-        return None
-
-
 def run_meme_pipeline(
     *,
     concept_title: str,
@@ -138,11 +208,19 @@ def run_meme_pipeline(
     prior_brief: dict[str, Any] | None,
     settings: Settings,
 ) -> dict[str, Any]:
-    brief: dict[str, str] | None = None
-    if force_image and prior_brief:
-        brief = _brief_from_client_payload(prior_brief, concept_title=concept_title)
-    if brief is None:
-        brief = build_meme_brief(concept_title=concept_title, summary=summary)
+    """
+    Always generates a new text brief (template + captions + fallback_prompt).
+
+    When force_image is True (client \"regenerate\" / reimagine), we still build a fresh brief.
+    If prior_brief is passed, its template name is avoided so the next meme is a different theme
+    when using classic Imgflip templates.
+    """
+    forbid: str | None = None
+    if force_image and prior_brief and isinstance(prior_brief, dict):
+        t = str(prior_brief.get("template") or "").strip().lower().replace(" ", "_")
+        if t in ALLOWED_TEMPLATES and t != "custom":
+            forbid = t
+    brief = build_meme_brief(concept_title=concept_title, summary=summary, forbid_template=forbid)
     template = brief["template"]
 
     use_imgflip = (
@@ -164,10 +242,17 @@ def run_meme_pipeline(
                 "image_url": url,
             }
 
-    raw, mime = generate_image_bytes_rest(
-        brief["fallback_prompt"],
-        model_id=settings.gemini_meme_image_model,
-    )
+    try:
+        raw, mime = generate_image_bytes_rest(
+            brief["fallback_prompt"],
+            model_id=settings.gemini_meme_image_model,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Gemini image generation failed; using local SVG meme fallback", exc_info=True)
+        raw, mime = _fallback_svg_meme_bytes(
+            top_text=brief.get("top_text", ""),
+            bottom_text=brief.get("bottom_text", ""),
+        )
     return {
         "brief": brief,
         "source": "gemini",
