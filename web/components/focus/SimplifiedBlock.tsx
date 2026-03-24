@@ -103,7 +103,7 @@ export function SimplifiedBlock({
           )}
           {key_terms.length > 0 && (
             <div className="mt-3">
-              <p className="mb-1.5 text-[11px] text-[var(--color-text-secondary)]">Terms preserved:</p>
+              <p className="mb-1.5 text-[11px] text-[var(--color-text-secondary)]">Key terms:</p>
               <div className="flex flex-wrap gap-1.5">
                 {key_terms.map((t) => (
                   <span

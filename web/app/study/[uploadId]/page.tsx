@@ -51,7 +51,7 @@ import { pushActivity } from "@/lib/localActivity";
 import { recordStudySession } from "@/lib/localSessions";
 import { getSupabaseBrowser } from "@/lib/supabase";
 
-type StudyUIMode = "chill" | "grind";
+type StudyUIMode = "tldr" | "grind" | "chill";
 
 const DECK_TASKS = ["meme", "audio", "wordle", "puzzle", "youtube"] as const;
 
@@ -85,6 +85,165 @@ function taskPending(ts: StudyDeckTasksStatus | null | undefined, key: (typeof D
 function deckNeedsPolling(row: StudyDeckRow | null | undefined): boolean {
   if (!row) return false;
   return DECK_TASKS.some((k) => taskPending(row.tasks_status, k));
+}
+
+function PracticeSectionCard({
+  s,
+  mode,
+}: {
+  s: StudyTransformSection;
+  mode: LearnerMode;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: s.is_fallback ? 0.72 : 1 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.35, ease: "easeOut" }}
+      className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)]/80 p-5"
+    >
+      {s.is_fallback && (
+        <div className="mb-3 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+          <span className="inline-block h-3 w-16 animate-pulse rounded bg-[var(--color-bg-tertiary)]" />
+          <span>Enhancing for {MODE_LABELS[mode]}…</span>
+        </div>
+      )}
+      <h3 className="font-semibold text-[var(--color-accent-cyan)]">
+        <MathRichText text={s.header} />
+      </h3>
+      <div className="mt-2 text-[var(--color-text-primary)]">
+        <MathRichText text={s.body} />
+      </div>
+      <WorkedExampleCard example={s.worked_example} />
+      {s.has_math &&
+        s.formula_annotation &&
+        (s.formula_annotation.formula.trim() || (s.formula_annotation.terms?.length ?? 0) > 0) && (
+          <FormulaAnnotationBlock formula={s.formula_annotation.formula} terms={s.formula_annotation.terms ?? []} />
+        )}
+    </motion.div>
+  );
+}
+
+/** Same meme in TLDR + Chill: prefer newest client recap, else pipeline MemeCard. */
+function StudyUnifiedMemeCard({
+  uploadId,
+  deck,
+  ts,
+  meme,
+  memeImageSrc,
+  memeTitle,
+  memeTone,
+  busyMeme,
+  onMeme,
+  invalidateDeck,
+  variant,
+}: {
+  uploadId: string;
+  deck: StudyDeckRow;
+  ts: StudyDeckTasksStatus | null | undefined;
+  meme: MemePipelineResponse | null;
+  memeImageSrc: string | null;
+  memeTitle: string;
+  memeTone: string;
+  busyMeme: boolean;
+  onMeme: (reimagine: boolean) => void;
+  invalidateDeck: () => void;
+  variant: "tldr" | "chill";
+}) {
+  const pending = taskPending(ts, "meme");
+  const err = ts?.meme === "error";
+
+  return (
+    <Card hoverable glow className="relative">
+      <div className="absolute right-4 top-4 z-10">
+        <DeckTaskStatus pending={pending} error={err} />
+      </div>
+      <div className="pt-2">
+        <p className="text-xs uppercase tracking-widest text-[var(--color-accent-pink)]">Meme recap</p>
+        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+          Synced across TLDR & Chill · shows your latest generated or pipeline meme
+        </p>
+        {pending ? (
+          <GameShimmer label="Meme loading" />
+        ) : err ? (
+          <p className="mt-4 text-sm text-[var(--color-danger)]">Meme task failed.</p>
+        ) : memeImageSrc ? (
+          <div className="mt-4">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={memeImageSrc}
+              alt="Study meme"
+              className="max-h-[480px] w-full max-w-lg rounded-[var(--radius-md)] border border-[var(--color-border-default)] object-contain"
+            />
+            {meme && (
+              <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                Template: <span className="text-[var(--color-text-secondary)]">{meme.brief.template}</span> · Source:{" "}
+                <span className="text-[var(--color-text-secondary)]">{meme.source}</span>
+              </p>
+            )}
+            {(meme?.brief.top_text || meme?.brief.bottom_text) && (
+              <div className="mt-3 text-sm text-[var(--color-text-secondary)]">
+                {meme?.brief.top_text ? (
+                  <p className="font-semibold text-[var(--color-text-primary)]">{meme.brief.top_text}</p>
+                ) : null}
+                {meme?.brief.bottom_text ? <p className="mt-1">{meme.brief.bottom_text}</p> : null}
+              </div>
+            )}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {variant === "tldr" ? (
+                <>
+                  <Button type="button" variant="secondary" disabled={busyMeme} loading={busyMeme} onClick={() => onMeme(false)}>
+                    Generate Meme Recap
+                  </Button>
+                  <Button type="button" variant="ghost" disabled={busyMeme} loading={busyMeme} onClick={() => onMeme(true)}>
+                    ✨ New theme
+                  </Button>
+                </>
+              ) : (
+                <Button type="button" variant="ghost" disabled={busyMeme} loading={busyMeme} onClick={() => onMeme(true)}>
+                  ✨ New meme theme
+                </Button>
+              )}
+            </div>
+          </div>
+        ) : deck.meme_image_url ? (
+          <div className="mt-4">
+            <MemeCard
+              uploadId={uploadId}
+              imageUrl={deck.meme_image_url}
+              title={memeTitle}
+              tone={memeTone}
+              onUpdated={() => invalidateDeck()}
+            />
+            <div className="mt-4 flex flex-wrap gap-2">
+              {variant === "tldr" ? (
+                <>
+                  <Button type="button" variant="secondary" disabled={busyMeme} loading={busyMeme} onClick={() => onMeme(false)}>
+                    Generate Meme Recap
+                  </Button>
+                  <Button type="button" variant="ghost" disabled={busyMeme} loading={busyMeme} onClick={() => onMeme(true)}>
+                    ✨ Replace with AI meme
+                  </Button>
+                </>
+              ) : (
+                <Button type="button" variant="ghost" disabled={busyMeme} loading={busyMeme} onClick={() => onMeme(true)}>
+                  ✨ Replace with AI meme
+                </Button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <p className="text-sm text-[var(--color-text-muted)]">No meme yet for this deck.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="primary" disabled={busyMeme} loading={busyMeme} onClick={() => onMeme(false)}>
+                Generate Meme Recap
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
 }
 
 function DeckTaskStatus({ pending, error }: { pending: boolean; error: boolean }) {
@@ -129,7 +288,9 @@ export default function StudyPage() {
   const [mode, setMode] = useState<LearnerMode>("adhd");
   const [dial, setDial] = useState<number | undefined>(undefined);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
-  const [studyUIMode, setStudyUIMode] = useState<StudyUIMode>("grind");
+  const [studyUIMode, setStudyUIMode] = useState<StudyUIMode>("tldr");
+  const [sectionsLayout, setSectionsLayout] = useState<"scroll" | "carousel">("scroll");
+  const [carouselIdx, setCarouselIdx] = useState(0);
   const [deckKickBusy, setDeckKickBusy] = useState(false);
   const [deckDeleteBusy, setDeckDeleteBusy] = useState(false);
 
@@ -344,6 +505,13 @@ export default function StudyPage() {
     );
   }, [streamedSections, conceptsQ.data]);
 
+  useEffect(() => {
+    setCarouselIdx((i) => {
+      const max = Math.max(0, sections.length - 1);
+      return Math.min(Math.max(0, i), max);
+    });
+  }, [sections.length]);
+
   const catalog = useMemo((): ConceptCatalogItem[] => {
     const rows = conceptsQ.data ?? [];
     return rows.map((c) => ({
@@ -426,6 +594,7 @@ export default function StudyPage() {
       });
       setMeme(res);
       void putMemeRecap(uploadId, res).catch(() => {});
+      void invalidateDeck();
     } finally {
       setBusyMeme(false);
     }
@@ -498,7 +667,7 @@ export default function StudyPage() {
             {uploadRow?.file_name ?? "Study deck"}
           </h1>
           <p className="text-sm text-[var(--color-text-secondary)]">
-            STEM view · summary, concept graph, deck games, and practice blocks.
+            TLDR · Grind · Chill — overview, drills, and unwind. Meme stays in sync between TLDR and Chill.
           </p>
         </div>
       </header>
@@ -531,8 +700,8 @@ export default function StudyPage() {
 
       {lectureReady && (
         <div className="space-y-10">
-          <div className="relative flex rounded-full bg-[var(--color-bg-tertiary)] p-1 sm:max-w-md">
-            {(["grind", "chill"] as const).map((m) => (
+          <div className="relative flex rounded-full bg-[var(--color-bg-tertiary)] p-1 sm:max-w-2xl">
+            {(["tldr", "grind", "chill"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -548,7 +717,9 @@ export default function StudyPage() {
                     transition={{ type: "spring", bounce: 0.2, duration: 0.35 }}
                   />
                 )}
-                <span className="relative z-10">{m === "grind" ? "Grind" : "Chill"}</span>
+                <span className="relative z-10">
+                  {m === "tldr" ? "TLDR" : m === "grind" ? "Grind" : "Chill"}
+                </span>
               </button>
             ))}
           </div>
@@ -588,10 +759,215 @@ export default function StudyPage() {
           )}
 
           <div key={studyUIMode} className="space-y-6">
+            {studyUIMode === "tldr" && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+                className="space-y-10"
+              >
+                <section className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6 shadow-[var(--shadow-card)]">
+                  <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Summary</h2>
+                  <div className="mt-3 text-[var(--color-text-primary)]">
+                    <MathRichText text={transformSummary || "Summary will appear when personalization finishes."} />
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <Button type="button" variant="primary" disabled={busyAudio} loading={busyAudio} onClick={() => void onAudio()}>
+                      Generate Audio
+                    </Button>
+                  </div>
+                  {audioUrl && (
+                    <audio className="mt-4 w-full" controls src={audioUrl}>
+                      <track kind="captions" />
+                    </audio>
+                  )}
+                </section>
+
+                {deck && (
+                  <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.05 }}>
+                    <Card hoverable glow className="relative">
+                      <div className="absolute right-4 top-4 z-10">
+                        <DeckTaskStatus pending={taskPending(ts, "audio")} error={ts?.audio === "error"} />
+                      </div>
+                      <div className="pt-2">
+                        <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Deck audio</h2>
+                        <p className="mt-1 text-xs text-[var(--color-text-muted)]">Narrated recap from your study deck pipeline</p>
+                        {taskPending(ts, "audio") ? (
+                          <GameShimmer label="Audio loading" />
+                        ) : ts?.audio === "error" ? (
+                          <p className="mt-4 text-sm text-[var(--color-danger)]">Audio task failed (check ElevenLabs key).</p>
+                        ) : deck.audio_url && deck.audio_transcript ? (
+                          <div className="mt-4">
+                            <AudioPlayer audioUrl={deck.audio_url} transcript={deck.audio_transcript} />
+                          </div>
+                        ) : (
+                          <p className="mt-4 text-sm text-[var(--color-text-muted)]">No deck audio yet.</p>
+                        )}
+                      </div>
+                    </Card>
+                  </motion.div>
+                )}
+
+                <section>
+                  <h2 className="mb-3 text-xl font-semibold text-[var(--color-text-primary)]">Concept relationships</h2>
+                  <div className="grid gap-6 lg:grid-cols-[1fr_minmax(260px,320px)]">
+                    <ConceptGraphView graph={conceptGraph} selectedId={selectedNodeId} onSelectNode={setSelectedNodeId} />
+                    <aside className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-4 lg:min-h-[200px]">
+                      {!selectedConcept && (
+                        <p className="text-sm text-[var(--color-text-muted)]">Select a node to see its summary and how it connects.</p>
+                      )}
+                      {selectedConcept && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-accent-cyan)]">Concept</p>
+                          <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">{selectedConcept.title}</h3>
+                          <div className="text-sm text-[var(--color-text-secondary)]">
+                            <MathRichText text={selectedConcept.summary} />
+                          </div>
+                          {selectedConcept.has_math && (
+                            <span className="inline-block rounded-full bg-[var(--color-accent-cyan)]/20 px-2 py-0.5 text-xs text-[var(--color-accent-cyan)]">
+                              Math-heavy
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </aside>
+                  </div>
+                </section>
+
+                {deck ? (
+                  <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.1 }}>
+                    <StudyUnifiedMemeCard
+                      uploadId={uploadId!}
+                      deck={deck}
+                      ts={ts}
+                      meme={meme}
+                      memeImageSrc={memeImageSrc}
+                      memeTitle={memeTitle}
+                      memeTone={memeTone}
+                      busyMeme={busyMeme}
+                      onMeme={(r) => void onMeme(r)}
+                      invalidateDeck={invalidateDeck}
+                      variant="tldr"
+                    />
+                  </motion.div>
+                ) : null}
+
+                <section className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6">
+                  <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Concept map (text)</h2>
+                  <div className="mt-3 text-sm text-[var(--color-text-primary)]">
+                    <MathRichText text={transformMap || "—"} className="whitespace-pre-wrap" />
+                  </div>
+                </section>
+
+                <section className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6">
+                  <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Key terms</h2>
+                  {transformTerms.length === 0 ? (
+                    <p className="mt-3 text-sm text-[var(--color-text-muted)]">—</p>
+                  ) : (
+                    <ul className="mt-3 list-disc space-y-1 pl-5 text-[var(--color-text-primary)]">
+                      {transformTerms.map((t) => (
+                        <li key={t}>{t}</li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                {sections.length > 0 && (
+                  <section className="space-y-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Sections & practice</h2>
+                      <div
+                        className="flex w-fit rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] p-0.5 text-xs font-medium"
+                        role="group"
+                        aria-label="Section layout"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setSectionsLayout("scroll")}
+                          className={`rounded-full px-3 py-1.5 transition-colors ${
+                            sectionsLayout === "scroll"
+                              ? "bg-[var(--color-bg-elevated)] text-[var(--color-accent-cyan)]"
+                              : "text-[var(--color-text-secondary)]"
+                          }`}
+                        >
+                          Scroll
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSectionsLayout("carousel")}
+                          className={`rounded-full px-3 py-1.5 transition-colors ${
+                            sectionsLayout === "carousel"
+                              ? "bg-[var(--color-bg-elevated)] text-[var(--color-accent-cyan)]"
+                              : "text-[var(--color-text-secondary)]"
+                          }`}
+                        >
+                          Carousel
+                        </button>
+                      </div>
+                    </div>
+                    {sectionsLayout === "scroll" ? (
+                      <div className="space-y-4">
+                        {sections.map((s, idx) => (
+                          <PracticeSectionCard
+                            key={`${s.concept_id ?? "x"}-${idx}-${s.header.slice(0, 32)}`}
+                            s={s}
+                            mode={mode}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            disabled={carouselIdx <= 0}
+                            onClick={() => setCarouselIdx((i) => Math.max(0, i - 1))}
+                            className="rounded-[var(--radius-md)] border border-[var(--color-border-default)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] disabled:opacity-40"
+                          >
+                            ← Previous
+                          </button>
+                          <span className="text-sm text-[var(--color-text-secondary)]">
+                            {carouselIdx + 1} / {sections.length}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={carouselIdx >= sections.length - 1}
+                            onClick={() => setCarouselIdx((i) => Math.min(sections.length - 1, i + 1))}
+                            className="rounded-[var(--radius-md)] border border-[var(--color-border-default)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] disabled:opacity-40"
+                          >
+                            Next →
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-1.5" role="tablist" aria-label="Section slides">
+                          {sections.map((_, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              role="tab"
+                              aria-selected={i === carouselIdx}
+                              aria-label={`Section ${i + 1} of ${sections.length}`}
+                              onClick={() => setCarouselIdx(i)}
+                              className={`h-2 rounded-full transition-all ${
+                                i === carouselIdx
+                                  ? "w-6 bg-[var(--color-accent-cyan)]"
+                                  : "w-2 bg-[var(--color-border-default)] hover:bg-[var(--color-text-muted)]"
+                              }`}
+                            />
+                          ))}
+                        </div>
+                        {sections[carouselIdx] != null ? (
+                          <PracticeSectionCard key={carouselIdx} s={sections[carouselIdx]!} mode={mode} />
+                        ) : null}
+                      </div>
+                    )}
+                  </section>
+                )}
+              </motion.div>
+            )}
+
             {studyUIMode === "chill" && deckQ.isLoading && (
               <div className="space-y-6">
-                <GameShimmer label="Meme loading" />
-                <GameShimmer label="Audio loading" />
+                <GameShimmer label="Meme" />
                 <GameShimmer label="YouTube suggestions" />
               </div>
             )}
@@ -599,53 +975,40 @@ export default function StudyPage() {
             {studyUIMode === "chill" && deck && (
               <>
                 <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0 }}>
-                  <Card hoverable glow className="relative">
-                    <div className="absolute right-4 top-4 z-10">
-                      <DeckTaskStatus pending={taskPending(ts, "meme")} error={ts?.meme === "error"} />
-                    </div>
-                    {taskPending(ts, "meme") ? (
-                      <GameShimmer label="Meme loading" />
-                    ) : ts?.meme === "error" ? (
-                      <p className="text-sm text-[var(--color-danger)]">Meme task failed.</p>
-                    ) : deck.meme_image_url ? (
-                      <MemeCard
-                        uploadId={uploadId!}
-                        imageUrl={deck.meme_image_url}
-                        title={memeTitle}
-                        tone={memeTone}
-                        onUpdated={() => invalidateDeck()}
-                      />
-                    ) : null}
-                  </Card>
+                  <StudyUnifiedMemeCard
+                    uploadId={uploadId!}
+                    deck={deck}
+                    ts={ts}
+                    meme={meme}
+                    memeImageSrc={memeImageSrc}
+                    memeTitle={memeTitle}
+                    memeTone={memeTone}
+                    busyMeme={busyMeme}
+                    onMeme={(r) => void onMeme(r)}
+                    invalidateDeck={invalidateDeck}
+                    variant="chill"
+                  />
                 </motion.div>
-
                 <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.1 }}>
-                  <Card hoverable glow className="relative">
-                    <div className="absolute right-4 top-4 z-10">
-                      <DeckTaskStatus pending={taskPending(ts, "audio")} error={ts?.audio === "error"} />
-                    </div>
-                    {taskPending(ts, "audio") ? (
-                      <GameShimmer label="Audio loading" />
-                    ) : ts?.audio === "error" ? (
-                      <p className="text-sm text-[var(--color-danger)]">Audio task failed (check ElevenLabs key).</p>
-                    ) : deck.audio_url && deck.audio_transcript ? (
-                      <AudioPlayer audioUrl={deck.audio_url} transcript={deck.audio_transcript} />
-                    ) : null}
-                  </Card>
-                </motion.div>
-
-                <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.2 }}>
                   <Card hoverable glow className="relative">
                     <div className="absolute right-4 top-4 z-10">
                       <DeckTaskStatus pending={taskPending(ts, "youtube")} error={ts?.youtube === "error"} />
                     </div>
-                    {taskPending(ts, "youtube") ? (
-                      <GameShimmer label="YouTube suggestions" />
-                    ) : ts?.youtube === "error" ? (
-                      <p className="text-sm text-[var(--color-danger)]">YouTube suggestions failed (set YOUTUBE_API_KEY).</p>
-                    ) : deck.youtube_suggestions && deck.youtube_suggestions.length > 0 ? (
-                      <YouTubeSuggestions suggestions={deck.youtube_suggestions} />
-                    ) : null}
+                    <div className="pt-2">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">YouTube</h2>
+                      <p className="mt-1 text-xs text-[var(--color-text-muted)]">Extra explainers to wind down</p>
+                      {taskPending(ts, "youtube") ? (
+                        <GameShimmer label="YouTube suggestions" />
+                      ) : ts?.youtube === "error" ? (
+                        <p className="mt-4 text-sm text-[var(--color-danger)]">YouTube suggestions failed (set YOUTUBE_API_KEY).</p>
+                      ) : deck.youtube_suggestions && deck.youtube_suggestions.length > 0 ? (
+                        <div className="mt-4">
+                          <YouTubeSuggestions suggestions={deck.youtube_suggestions} />
+                        </div>
+                      ) : (
+                        <p className="mt-4 text-sm text-[var(--color-text-muted)]">No suggestions yet.</p>
+                      )}
+                    </div>
                   </Card>
                 </motion.div>
               </>
@@ -718,134 +1081,6 @@ export default function StudyPage() {
               </>
             )}
           </div>
-
-          <section className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6 shadow-[var(--shadow-card)]">
-            <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Summary</h2>
-            <div className="mt-3 text-[var(--color-text-primary)]">
-              <MathRichText text={transformSummary || "Summary will appear when personalization finishes."} />
-            </div>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <Button type="button" variant="primary" disabled={busyAudio} loading={busyAudio} onClick={() => void onAudio()}>
-                Generate Audio
-              </Button>
-              <Button type="button" variant="secondary" disabled={busyMeme} loading={busyMeme} onClick={() => void onMeme(false)}>
-                Generate Meme Recap
-              </Button>
-              <Button type="button" variant="ghost" disabled={busyMeme} loading={busyMeme} onClick={() => void onMeme(true)}>
-                ✨ Regenerate meme (new theme)
-              </Button>
-            </div>
-            {audioUrl && (
-              <audio className="mt-4 w-full" controls src={audioUrl}>
-                <track kind="captions" />
-              </audio>
-            )}
-          </section>
-
-          <section>
-            <h2 className="mb-3 text-xl font-semibold text-[var(--color-text-primary)]">Concept relationships</h2>
-            <div className="grid gap-6 lg:grid-cols-[1fr_minmax(260px,320px)]">
-              <ConceptGraphView graph={conceptGraph} selectedId={selectedNodeId} onSelectNode={setSelectedNodeId} />
-              <aside className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-4 lg:min-h-[200px]">
-                {!selectedConcept && (
-                  <p className="text-sm text-[var(--color-text-muted)]">Select a node to see its summary and how it connects.</p>
-                )}
-                {selectedConcept && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-accent-cyan)]">Concept</p>
-                    <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">{selectedConcept.title}</h3>
-                    <div className="text-sm text-[var(--color-text-secondary)]">
-                      <MathRichText text={selectedConcept.summary} />
-                    </div>
-                    {selectedConcept.has_math && (
-                      <span className="inline-block rounded-full bg-[var(--color-accent-cyan)]/20 px-2 py-0.5 text-xs text-[var(--color-accent-cyan)]">
-                        Math-heavy
-                      </span>
-                    )}
-                  </div>
-                )}
-              </aside>
-            </div>
-          </section>
-
-          {meme && memeImageSrc && (
-            <section className="rounded-[var(--radius-lg)] border border-[var(--color-accent-pink)]/35 bg-[var(--color-bg-secondary)] p-6 shadow-[var(--shadow-card)]">
-              <p className="text-xs uppercase tracking-widest text-[var(--color-accent-pink)]">Meme recap (local)</p>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Template: <span className="text-[var(--color-text-secondary)]">{meme.brief.template}</span> · Source:{" "}
-                <span className="text-[var(--color-text-secondary)]">{meme.source}</span>
-              </p>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={memeImageSrc}
-                alt="Study meme"
-                className="mt-4 max-h-[480px] w-full max-w-lg rounded-[var(--radius-md)] border border-[var(--color-border-default)] object-contain"
-              />
-              {(meme.brief.top_text || meme.brief.bottom_text) && (
-                <div className="mt-3 text-sm text-[var(--color-text-secondary)]">
-                  {meme.brief.top_text ? <p className="font-semibold text-[var(--color-text-primary)]">{meme.brief.top_text}</p> : null}
-                  {meme.brief.bottom_text ? <p className="mt-1">{meme.brief.bottom_text}</p> : null}
-                </div>
-              )}
-            </section>
-          )}
-
-          <section className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6">
-            <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Concept map (text)</h2>
-            <div className="mt-3 text-sm text-[var(--color-text-primary)]">
-              <MathRichText text={transformMap || "—"} className="whitespace-pre-wrap" />
-            </div>
-          </section>
-
-          <section className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6">
-            <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Key terms</h2>
-            {transformTerms.length === 0 ? (
-              <p className="mt-3 text-sm text-[var(--color-text-muted)]">—</p>
-            ) : (
-              <ul className="mt-3 list-disc space-y-1 pl-5 text-[var(--color-text-primary)]">
-                {transformTerms.map((t) => (
-                  <li key={t}>{t}</li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          {sections.length > 0 && (
-            <section className="space-y-4">
-              <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Sections & practice</h2>
-              {sections.map((s, idx) => (
-                <motion.div
-                  key={`${s.concept_id ?? "x"}-${idx}-${s.header.slice(0, 32)}`}
-                  initial={{ opacity: s.is_fallback ? 0.72 : 1 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.35, ease: "easeOut" }}
-                  className="rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)]/80 p-5"
-                >
-                  {s.is_fallback && (
-                    <div className="mb-3 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                      <span className="inline-block h-3 w-16 animate-pulse rounded bg-[var(--color-bg-tertiary)]" />
-                      <span>Enhancing for {MODE_LABELS[mode]}…</span>
-                    </div>
-                  )}
-                  <h3 className="font-semibold text-[var(--color-accent-cyan)]">
-                    <MathRichText text={s.header} />
-                  </h3>
-                  <div className="mt-2 text-[var(--color-text-primary)]">
-                    <MathRichText text={s.body} />
-                  </div>
-                  <WorkedExampleCard example={s.worked_example} />
-                  {s.has_math &&
-                    s.formula_annotation &&
-                    (s.formula_annotation.formula.trim() || (s.formula_annotation.terms?.length ?? 0) > 0) && (
-                      <FormulaAnnotationBlock
-                        formula={s.formula_annotation.formula}
-                        terms={s.formula_annotation.terms ?? []}
-                      />
-                    )}
-                </motion.div>
-              ))}
-            </section>
-          )}
         </div>
       )}
     </motion.div>

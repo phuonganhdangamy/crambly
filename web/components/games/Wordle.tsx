@@ -37,6 +37,8 @@ function cellClass(s: LetterState): string {
   return "border-slate-700 bg-slate-900/80 text-slate-500";
 }
 
+type GameStatus = "playing" | "won" | "lost" | "revealed";
+
 export function Wordle({
   wordBank,
   conceptHints,
@@ -59,18 +61,29 @@ export function Wordle({
   const [target, setTarget] = useState(() => "");
   const [guesses, setGuesses] = useState<string[]>([]);
   const [current, setCurrent] = useState("");
-  const [status, setStatus] = useState<"playing" | "won" | "lost">("playing");
+  const [status, setStatus] = useState<GameStatus>("playing");
   const [celebrate, setCelebrate] = useState(false);
+  const [hintOpen, setHintOpen] = useState(false);
+  const [firstLetterRevealed, setFirstLetterRevealed] = useState(false);
 
-  const pickWord = useCallback(() => {
-    if (playable.length === 0) return;
-    const w = playable[Math.floor(Math.random() * playable.length)] ?? "";
-    setTarget(w);
-    setGuesses([]);
-    setCurrent("");
-    setStatus("playing");
-    setCelebrate(false);
-  }, [playable]);
+  const pickWord = useCallback(
+    (opts?: { excludeCurrent?: boolean }) => {
+      if (playable.length === 0) return;
+      let pool = playable;
+      if (opts?.excludeCurrent && target && playable.length > 1) {
+        pool = playable.filter((w) => w !== target);
+      }
+      const w = pool[Math.floor(Math.random() * pool.length)] ?? "";
+      setTarget(w);
+      setGuesses([]);
+      setCurrent("");
+      setStatus("playing");
+      setCelebrate(false);
+      setHintOpen(false);
+      setFirstLetterRevealed(false);
+    },
+    [playable, target],
+  );
 
   useEffect(() => {
     pickWord();
@@ -80,7 +93,10 @@ export function Wordle({
     (word: string) => {
       const low = word.toLowerCase();
       const hit = conceptHints.find(
-        (h) => h.term.toLowerCase() === low || h.term.toLowerCase().includes(low) || low.includes(h.term.toLowerCase()),
+        (h) =>
+          h.term.toLowerCase() === low ||
+          h.term.toLowerCase().includes(low) ||
+          low.includes(h.term.toLowerCase()),
       );
       return hit?.definition ?? "Definition from your materials — keep this term in mind for the exam.";
     },
@@ -102,6 +118,24 @@ export function Wordle({
     }
     if (next.length >= ROWS) setStatus("lost");
   }, [current, guesses, onWin, playable, status, target]);
+
+  const revealAnswer = useCallback(() => {
+    if (!target || status === "won") return;
+    setStatus("revealed");
+    setCurrent("");
+  }, [status, target]);
+
+  const applyHint = useCallback(() => {
+    if (!target || status !== "playing") return;
+    setHintOpen(true);
+    if (!firstLetterRevealed) {
+      setFirstLetterRevealed(true);
+      const L = target[0]?.toLowerCase() ?? "";
+      if (L && !current.startsWith(L)) {
+        setCurrent((c) => (c.length === 0 ? L : c));
+      }
+    }
+  }, [current, firstLetterRevealed, status, target]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -151,19 +185,56 @@ export function Wordle({
     );
   }
 
+  const canPlay = status === "playing";
+  const answerRow =
+    status === "revealed" && target
+      ? target
+          .toUpperCase()
+          .split("")
+          .map((letter) => ({ letter, state: "correct" as LetterState }))
+      : null;
+
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-lg font-semibold text-white">Wordle</h3>
-        <button
-          type="button"
-          onClick={() => pickWord()}
-          className="rounded-lg border border-slate-600 px-3 py-1 text-sm text-slate-200 hover:bg-slate-800"
-        >
-          Next word
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={!canPlay || !target}
+            onClick={() => applyHint()}
+            className="rounded-lg border border-amber-600/60 px-3 py-1 text-sm text-amber-100 hover:bg-amber-900/30 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Hint
+          </button>
+          <button
+            type="button"
+            disabled={!target || status === "won"}
+            onClick={() => revealAnswer()}
+            className="rounded-lg border border-slate-600 px-3 py-1 text-sm text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Reveal answer
+          </button>
+          <button
+            type="button"
+            onClick={() => pickWord({ excludeCurrent: playable.length > 1 })}
+            className="rounded-lg border border-cyan-600/50 px-3 py-1 text-sm text-cyan-100 hover:bg-cyan-950/40"
+          >
+            Skip to next word
+          </button>
+        </div>
       </div>
       <p className="mt-1 text-xs text-slate-500">Six guesses · your lecture&apos;s vocabulary</p>
+
+      {hintOpen && target && (
+        <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-950/40 p-3 text-sm text-amber-100/95">
+          <p className="font-medium text-amber-200">Hint</p>
+          <p className="mt-1 text-amber-100/90">{definitionFor(target)}</p>
+          {firstLetterRevealed && (
+            <p className="mt-2 text-xs text-amber-200/80">First letter: {target[0]?.toUpperCase() ?? "—"}</p>
+          )}
+        </div>
+      )}
 
       <div className="mx-auto mt-6 flex flex-col gap-1.5 sm:max-w-[340px]">
         {grid.map((row, ri) => (
@@ -178,6 +249,18 @@ export function Wordle({
             ))}
           </div>
         ))}
+        {answerRow && (
+          <div className="grid grid-cols-5 gap-1.5 pt-1">
+            {answerRow.map((cell, ci) => (
+              <div
+                key={ci}
+                className={`flex aspect-square items-center justify-center rounded-md border-2 text-lg font-bold uppercase ${cellClass(cell.state)}`}
+              >
+                {cell.letter}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {status === "won" && (
@@ -196,33 +279,39 @@ export function Wordle({
           <p className="mt-2 text-sm text-rose-200/90">{definitionFor(target)}</p>
         </div>
       )}
+      {status === "revealed" && (
+        <div className="mt-6 rounded-xl border border-slate-500/40 bg-slate-800/50 p-4 text-slate-100">
+          <p className="font-semibold text-slate-200">Answer revealed: {target.toUpperCase()}</p>
+          <p className="mt-2 text-sm text-slate-300">{definitionFor(target)}</p>
+        </div>
+      )}
 
       <div className="mx-auto mt-6 max-w-[480px] space-y-2">
         <div className="flex flex-wrap justify-center gap-1">
           {"qwertyuiop".split("").map((k) => (
-            <KeyCap key={k} k={k} onPress={() => status === "playing" && setCurrent((c) => (c.length < 5 ? c + k : c))} />
+            <KeyCap key={k} k={k} onPress={() => canPlay && setCurrent((c) => (c.length < 5 ? c + k : c))} />
           ))}
         </div>
         <div className="flex flex-wrap justify-center gap-1">
           {"asdfghjkl".split("").map((k) => (
-            <KeyCap key={k} k={k} onPress={() => status === "playing" && setCurrent((c) => (c.length < 5 ? c + k : c))} />
+            <KeyCap key={k} k={k} onPress={() => canPlay && setCurrent((c) => (c.length < 5 ? c + k : c))} />
           ))}
         </div>
         <div className="flex flex-wrap justify-center gap-1">
           <button
             type="button"
             className="rounded bg-slate-700 px-2 py-2 text-xs font-semibold text-white"
-            onClick={() => status === "playing" && submit()}
+            onClick={() => canPlay && submit()}
           >
             Enter
           </button>
           {"zxcvbnm".split("").map((k) => (
-            <KeyCap key={k} k={k} onPress={() => status === "playing" && setCurrent((c) => (c.length < 5 ? c + k : c))} />
+            <KeyCap key={k} k={k} onPress={() => canPlay && setCurrent((c) => (c.length < 5 ? c + k : c))} />
           ))}
           <button
             type="button"
             className="rounded bg-slate-700 px-2 py-2 text-xs font-semibold text-white"
-            onClick={() => status === "playing" && setCurrent((c) => c.slice(0, -1))}
+            onClick={() => canPlay && setCurrent((c) => c.slice(0, -1))}
           >
             ⌫
           </button>

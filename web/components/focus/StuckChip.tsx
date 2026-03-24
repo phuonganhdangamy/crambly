@@ -84,7 +84,7 @@ export function StuckChip({
           worked_example={result.worked_example}
           key_terms={result.key_terms}
           learnerMode={learnerSnapshot}
-          hasMath={section.has_math}
+          hasMath={false}
           onDismiss={() => {
             setResult(null);
             onVisualClear();

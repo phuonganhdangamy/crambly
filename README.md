@@ -137,7 +137,25 @@ An optional, fully on-device focus assistant.
 Beyond upload and transform, the **Next.js** desktop app includes a full **per-lecture study** experience and optional **course** organization.
 
 **Library → Study (`/study/[uploadId]`)**  
-Open any upload from the library to see a STEM-oriented layout: interactive **concept graph** (`ConceptGraphView`), **math-aware** summaries (`MathRichText`), **worked examples** (`WorkedExampleCard`), and **formula annotations** with term callouts (`FormulaAnnotationBlock`). Learner mode and the complexity dial from local settings apply to transforms on this page.
+Open any upload from the library to see a STEM-oriented layout. Learner mode and the complexity dial from local settings apply to transforms on this page.
+
+**Study deck UI — TLDR · Grind · Chill**  
+The main study surface is split into three tabs so dense content is grouped by intent:
+
+| Tab | Contents |
+|---|---|
+| **TLDR** | Plain-language **summary** (math-aware via `MathRichText`), **Generate Audio** for on-demand TTS, **deck audio** from the pipeline (`AudioPlayer` when ready), **concept relationships** (interactive graph `ConceptGraphView` + selected-concept panel), **meme recap** (unified card — see below), **concept map (text)**, **key terms**, and **Sections & practice** (per-section `WorkedExampleCard` + `FormulaAnnotationBlock` where applicable). |
+| **Grind** | **Wordle** (lecture word bank), **PuzzleMatch** (concept–definition pairs), **QuizBurst** (MCQ burst). |
+| **Chill** | Same **meme recap** as TLDR (always the latest client or pipeline image) plus **YouTube** suggestions — no duplicate audio block here. |
+
+**Meme recap (TLDR + Chill in sync)**  
+One shared state drives the meme in both tabs: the UI prefers the newest **client-generated** recap when present, otherwise the **pipeline** meme from `study_deck` (`MemeCard`). Regenerating from either tab updates storage and refreshes the deck so both views stay aligned.
+
+**Sections & practice**  
+Section cards can be browsed in **Scroll** (full list) or **Carousel** (prev / next, slide counter, dot jumpers) via an in-page toggle.
+
+**Wordle (Grind)**  
+Beyond guessing: **Hint** (concept-style definition + first letter, prefilled when helpful), **Reveal answer** (ends the round and shows the term + explanation), and **Skip to next word** (picks another five-letter term from the bank when more than one exists).
 
 **Study deck (background pipeline)**  
 A **study deck** row per upload drives async tasks (meme recap, TTS audio, word bank, puzzles, quiz burst, YouTube ideas). While tasks run, the UI uses **Supabase Realtime** on `study_deck` so new assets can appear without a manual refresh. Users can trigger deck generation, regenerate pieces (e.g. meme), and delete a deck row to clear cached games/media while keeping the underlying upload and concepts.
@@ -149,7 +167,7 @@ A **study deck** row per upload drives async tasks (meme recap, TTS audio, word 
 | `MemeCard` | Displays the generated meme recap for the lecture |
 | `AudioPlayer` | Plays the TTS / audio walkthrough clip |
 | `YouTubeSuggestions` | Surfaces curated related-video ideas from the deck |
-| `Wordle` | Word-bank style game tied to key terms from the material |
+| `Wordle` | Word-bank game: hints, reveal answer, skip to next word |
 | `PuzzleMatch` | Match concepts to definitions (pairs puzzle) |
 | `QuizBurst` | Short multiple-choice burst for the upload |
 | `GameShimmer` | Skeleton / loading state while deck slices are still generating |

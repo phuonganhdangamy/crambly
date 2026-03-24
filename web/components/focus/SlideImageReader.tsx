@@ -198,7 +198,7 @@ function SlideFrame({
               worked_example={simplified.worked_example}
               key_terms={simplified.key_terms}
               learnerMode={learnerMode}
-              hasMath={concept.has_math}
+              hasMath={false}
               onDismiss={onDismissSimplified}
             />
           </div>
