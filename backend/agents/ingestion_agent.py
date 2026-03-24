@@ -82,6 +82,28 @@ def _normalize_concepts(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _fallback_concept_graph(inserted_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Deterministic graph when LLM output is missing or invalid (always uses real concept UUIDs)."""
+    rows = inserted_rows[:10]
+    nodes = [
+        {
+            "id": str(r["id"]),
+            "label": str(r.get("title", "Concept"))[:120] or str(r["id"])[:8],
+        }
+        for r in rows
+    ]
+    edges: list[dict[str, str]] = []
+    for i in range(len(nodes) - 1):
+        edges.append(
+            {
+                "source": nodes[i]["id"],
+                "target": nodes[i + 1]["id"],
+                "relationship": "related topic",
+            }
+        )
+    return {"nodes": nodes, "edges": edges}
+
+
 def _build_concept_graph(inserted_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Gemini builds a small relationship graph; node ids must be real concept UUIDs."""
     if not inserted_rows:
@@ -104,11 +126,13 @@ def _build_concept_graph(inserted_rows: list[dict[str, Any]]) -> dict[str, Any] 
             # This graph is optional; cap attempts so /api/upload doesn't hang
             # when Gemini is slow or rate-limited.
             max_attempts=2,
-            max_output_tokens=512,
+            # 512 was too small — truncated JSON caused parse failures and empty graphs.
+            max_output_tokens=2048,
         )
         data = extract_json_blob(raw)
         if not isinstance(data, dict):
-            return None
+            logger.warning("Concept graph model returned non-object JSON; using fallback graph")
+            return _fallback_concept_graph(inserted_rows)
         allowed = {str(r["id"]) for r in inserted_rows}
         raw_nodes = data.get("nodes") or []
         nodes: list[dict[str, str]] = []
@@ -141,11 +165,12 @@ def _build_concept_graph(inserted_rows: list[dict[str, Any]]) -> dict[str, Any] 
                 )
         edges = edges[:20]
         if not nodes:
-            return None
+            logger.warning("Concept graph had no valid nodes (wrong UUIDs?); using fallback graph")
+            return _fallback_concept_graph(inserted_rows)
         return {"nodes": nodes, "edges": edges}
     except Exception:  # noqa: BLE001
-        logger.warning("Concept graph generation failed", exc_info=True)
-        return None
+        logger.warning("Concept graph generation failed; using fallback graph", exc_info=True)
+        return _fallback_concept_graph(inserted_rows)
 
 
 def run_ingestion(
@@ -155,6 +180,7 @@ def run_ingestion(
     file_bytes: bytes,
     file_type: str,
     content_type: str | None = None,
+    course_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Persist file to Supabase Storage, parse with Gemini, write `concepts` rows.
@@ -163,6 +189,17 @@ def run_ingestion(
     ensure_demo_user()
     sb = supabase_client()
     s = get_settings()
+    if course_id:
+        cr = (
+            sb.table("courses")
+            .select("id")
+            .eq("id", course_id.strip())
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if not cr.data:
+            raise ValueError("course_id not found or does not belong to this user")
     bucket = s.supabase_upload_bucket
     storage_path = f"{user_id}/{uuid4().hex}_{file_name}"
 
@@ -183,13 +220,15 @@ def run_ingestion(
             )
         raise RuntimeError(f"Storage upload failed: {msg}") from e
 
-    upload_row = {
+    upload_row: dict[str, Any] = {
         "user_id": user_id,
         "file_name": file_name,
         "file_url": storage_path,
         "file_type": file_type,
         "status": "processing",
     }
+    if course_id:
+        upload_row["course_id"] = course_id.strip()
     up = sb.table("uploads").insert(upload_row).execute()
     upload_id = str(up.data[0]["id"])
 

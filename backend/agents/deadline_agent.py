@@ -88,11 +88,21 @@ def recompute_priorities_for_user(user_id: str) -> list[dict[str, Any]]:
         .limit(1)
         .execute()
     )
-    confusion: dict[str, float] = {}
+    confusion_flat: dict[str, float] = {}
+    confusion_by_course_raw: dict[str, Any] = {}
     if twin.data:
-        raw_c = twin.data[0].get("confusion_score") or {}
+        row0 = twin.data[0]
+        raw_c = row0.get("confusion_score") or {}
         if isinstance(raw_c, dict):
-            confusion = {str(k): float(v) for k, v in raw_c.items() if v is not None}
+            confusion_flat = {str(k): float(v) for k, v in raw_c.items() if v is not None}
+        raw_bc = row0.get("confusion_by_course") or {}
+        if isinstance(raw_bc, dict):
+            confusion_by_course_raw = raw_bc
+
+    courses_res = sb.table("courses").select("id,code").eq("user_id", user_id).execute()
+    course_uuid_to_code: dict[str, str] = {
+        str(r["id"]): str(r["code"]) for r in (courses_res.data or []) if r.get("id")
+    }
 
     res = sb.table("assessments").select("*").eq("user_id", user_id).execute()
     rows = res.data or []
@@ -100,6 +110,15 @@ def recompute_priorities_for_user(user_id: str) -> list[dict[str, Any]]:
     for a in rows:
         due = date.fromisoformat(str(a["due_date"]))
         u = _urgency(due, today, s.total_semester_days)
+        aid = a.get("course_id")
+        if aid:
+            code = course_uuid_to_code.get(str(aid))
+            inner = confusion_by_course_raw.get(code) if code else None
+            if not isinstance(inner, dict):
+                inner = {}
+            confusion = {str(k): float(v) for k, v in inner.items() if v is not None}
+        else:
+            confusion = confusion_flat
         cavg = _avg_confusion(list(a.get("topics_covered") or []), confusion)
         priority = (float(a["grade_weight"]) * 0.5) + (u * 0.3) + (cavg * 0.2)
         sb.table("assessments").update({"priority_score": priority}).eq("id", a["id"]).execute()
@@ -131,35 +150,72 @@ def run_deadline_from_bytes(
     file_name: str,
     file_bytes: bytes,
     content_type: str | None,
+    course_id: str | None = None,
 ) -> list[dict[str, Any]]:
     ensure_demo_user()
     sb = supabase_client()
     mime = content_type or "application/pdf"
     raw = generate_multimodal(SYLLABUS_PROMPT, mime_type=mime, data=file_bytes)
     assessments = _parse_assessments(extract_json_blob(raw))
-    return _persist_and_rank(user_id, assessments)
+    return _persist_and_rank(user_id, assessments, course_id=course_id)
 
 
-def run_deadline_from_text(*, user_id: str, syllabus_text: str) -> list[dict[str, Any]]:
+def run_deadline_from_text(
+    *,
+    user_id: str,
+    syllabus_text: str,
+    course_id: str | None = None,
+) -> list[dict[str, Any]]:
     ensure_demo_user()
     raw = generate_text(SYLLABUS_PROMPT + "\n\nSYLLABUS TEXT:\n" + syllabus_text[:12000])
     assessments = _parse_assessments(extract_json_blob(raw))
-    return _persist_and_rank(user_id, assessments)
+    return _persist_and_rank(user_id, assessments, course_id=course_id)
 
 
-def _persist_and_rank(user_id: str, assessments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _persist_and_rank(
+    user_id: str,
+    assessments: list[dict[str, Any]],
+    *,
+    course_id: str | None = None,
+) -> list[dict[str, Any]]:
     sb = supabase_client()
-    # Replace previous assessments for demo clarity
-    sb.table("assessments").delete().eq("user_id", user_id).execute()
-    for a in assessments:
-        sb.table("assessments").insert(
-            {
-                "user_id": user_id,
-                "name": a["name"],
-                "due_date": a["due_date"],
-                "grade_weight": a["grade_weight"],
-                "topics_covered": a["topics_covered"],
-                "priority_score": None,
-            }
-        ).execute()
+    if course_id:
+        cr = (
+            sb.table("courses")
+            .select("id")
+            .eq("id", course_id.strip())
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if not cr.data:
+            raise ValueError("course_id not found or does not belong to this user")
+        cid = course_id.strip()
+        sb.table("assessments").delete().eq("user_id", user_id).eq("course_id", cid).execute()
+        for a in assessments:
+            sb.table("assessments").insert(
+                {
+                    "user_id": user_id,
+                    "course_id": cid,
+                    "name": a["name"],
+                    "due_date": a["due_date"],
+                    "grade_weight": a["grade_weight"],
+                    "topics_covered": a["topics_covered"],
+                    "priority_score": None,
+                }
+            ).execute()
+    else:
+        # Legacy: only replace assessments not tied to a course
+        sb.table("assessments").delete().eq("user_id", user_id).is_("course_id", "null").execute()
+        for a in assessments:
+            sb.table("assessments").insert(
+                {
+                    "user_id": user_id,
+                    "name": a["name"],
+                    "due_date": a["due_date"],
+                    "grade_weight": a["grade_weight"],
+                    "topics_covered": a["topics_covered"],
+                    "priority_score": None,
+                }
+            ).execute()
     return recompute_priorities_for_user(user_id)

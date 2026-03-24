@@ -94,9 +94,10 @@ export function ConceptGraphView({
   if (empty) {
     return (
       <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-slate-700 bg-slate-900/40 px-6 text-center text-sm text-slate-500">
-        No concept graph yet. Run the Supabase migration{" "}
+        No concept graph is available for this deck yet. If this is a recent upload, refresh once after
+        processing finishes. If it persists, ensure migration{" "}
         <code className="mx-1 rounded bg-slate-800 px-1 text-slate-300">20250325000000_concepts_stem_visual.sql</code>{" "}
-        and re-upload your file so ingestion can build relationships.
+        has been applied.
       </div>
     );
   }

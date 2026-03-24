@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { fetchTwin, fetchUploads } from "@/lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { deleteUpload, fetchTwin, fetchUploads } from "@/lib/api";
 import { getSupabaseBrowser } from "@/lib/supabase";
 
 function WeakBadge({ title, weak }: { title: string; weak: string[] }) {
@@ -14,9 +14,19 @@ function WeakBadge({ title, weak }: { title: string; weak: string[] }) {
 }
 
 export default function LibraryPage() {
+  const qc = useQueryClient();
   const uploads = useQuery({ queryKey: ["uploads"], queryFn: fetchUploads });
   const twin = useQuery({ queryKey: ["twin"], queryFn: fetchTwin });
   const supabaseReady = Boolean(getSupabaseBrowser());
+
+  const del = useMutation({
+    mutationFn: (id: string) => deleteUpload(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["uploads"] });
+      void qc.invalidateQueries({ queryKey: ["courseUploads"] });
+      void qc.invalidateQueries({ queryKey: ["courseAggregate"] });
+    },
+  });
 
   const weak = (twin.data?.digital_twin?.weak_topics as string[] | undefined) ?? [];
 
@@ -43,32 +53,51 @@ export default function LibraryPage() {
 
       <div className="grid gap-4">
         {(uploads.data ?? []).map((u) => (
-          <Link
+          <div
             key={u.id}
-            href={`/study/${u.id}`}
-            className="block rounded-2xl border border-slate-800 bg-slate-900/60 p-5 transition hover:border-indigo-500/50"
+            className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 transition hover:border-indigo-500/50 sm:flex-row sm:items-center sm:justify-between"
           >
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-lg font-semibold text-white">{u.file_name}</p>
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                  u.status === "ready"
-                    ? "bg-emerald-500/20 text-emerald-200"
-                    : u.status === "processing"
-                      ? "bg-amber-500/20 text-amber-100"
-                      : "bg-rose-500/20 text-rose-100"
-                }`}
-              >
-                {u.status}
-              </span>
-              <WeakBadge title={u.file_name} weak={weak} />
-            </div>
-            <p className="mt-2 text-sm text-slate-400">
-              {u.concepts_count} concepts extracted
-              {u.learner_mode ? ` · Mode: ${u.learner_mode}` : ""}
-              {u.complexity_dial != null ? ` · Dial: ${Math.round(Number(u.complexity_dial) * 100)}%` : ""}
-            </p>
-          </Link>
+            <Link href={`/study/${u.id}`} className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-lg font-semibold text-white">{u.file_name}</p>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    u.status === "ready"
+                      ? "bg-emerald-500/20 text-emerald-200"
+                      : u.status === "processing"
+                        ? "bg-amber-500/20 text-amber-100"
+                        : "bg-rose-500/20 text-rose-100"
+                  }`}
+                >
+                  {u.status}
+                </span>
+                <WeakBadge title={u.file_name} weak={weak} />
+              </div>
+              <p className="mt-2 text-sm text-slate-400">
+                {u.concepts_count} concepts extracted
+                {u.course_code ? ` · Course: ${u.course_code}` : ""}
+                {u.learner_mode ? ` · Mode: ${u.learner_mode}` : ""}
+                {u.complexity_dial != null ? ` · Dial: ${Math.round(Number(u.complexity_dial) * 100)}%` : ""}
+              </p>
+            </Link>
+            <button
+              type="button"
+              disabled={del.isPending}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    `Permanently delete “${u.file_name}” and all concepts / study deck data? This cannot be undone.`,
+                  )
+                ) {
+                  return;
+                }
+                del.mutate(u.id);
+              }}
+              className="shrink-0 self-start rounded-lg border border-rose-500/40 px-3 py-2 text-sm font-semibold text-rose-300 hover:bg-rose-500/10 disabled:opacity-50 sm:self-center"
+            >
+              Delete
+            </button>
+          </div>
         ))}
       </div>
 

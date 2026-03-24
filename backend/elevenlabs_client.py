@@ -11,7 +11,7 @@ from config import get_settings
 logger = logging.getLogger(__name__)
 
 
-def synthesize_speech(text: str) -> bytes:
+def synthesize_speech(text: str, *, max_chars: int = 2500) -> bytes:
     s = get_settings()
     if not s.elevenlabs_api_key:
         raise RuntimeError("ELEVENLABS_API_KEY is not set")
@@ -21,8 +21,9 @@ def synthesize_speech(text: str) -> bytes:
         "accept": "audio/mpeg",
         "content-type": "application/json",
     }
+    cap = max(256, min(max_chars, 10000))
     body = {
-        "text": text[:2500],
+        "text": text[:cap],
         "model_id": "eleven_multilingual_v2",
         "voice_settings": {"stability": 0.4, "similarity_boost": 0.75},
     }

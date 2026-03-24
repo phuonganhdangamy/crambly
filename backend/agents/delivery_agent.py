@@ -152,3 +152,70 @@ def build_pulse(user_id: str) -> dict[str, Any]:
         "concept_chunks": chunks,
         "quiz_burst": quiz_burst[:5],
     }
+
+
+def build_quiz_burst_for_upload(upload_id: str) -> list[dict[str, Any]]:
+    """Five MCQs grounded only in concepts for this upload (study deck Grind mode)."""
+    sb = supabase_client()
+    up = sb.table("uploads").select("id").eq("id", upload_id).limit(1).execute()
+    if not up.data:
+        return []
+    c = (
+        sb.table("concepts")
+        .select("id,title,summary,exam_importance")
+        .eq("upload_id", upload_id)
+        .execute()
+    )
+    pool: list[dict[str, Any]] = list(c.data or [])
+    pool.sort(key=lambda r: int(r.get("exam_importance") or 0), reverse=True)
+    pool = pool[:12]
+    if not pool:
+        return []
+    context = "\n".join(f"- {x['title']}: {x['summary']}" for x in pool[:8])
+    raw = generate_text(
+        QUIZ_PROMPT + f"\n\nConcept context (this upload only):\n{context[:6000]}",
+        temperature=0.4,
+    )
+    quiz_json = extract_json_blob(raw)
+    questions = quiz_json.get("questions") if isinstance(quiz_json, dict) else None
+    if not isinstance(questions, list):
+        questions = []
+
+    quiz_burst: list[dict[str, Any]] = []
+    for q in questions[:5]:
+        if not isinstance(q, dict):
+            continue
+        choices = list(q.get("choices") or [])
+        if len(choices) < 2:
+            continue
+        cid = None
+        title = str(q.get("topic", ""))
+        for row in pool:
+            if title and title.lower() in str(row.get("title", "")).lower():
+                cid = str(row["id"])
+                break
+        quiz_burst.append(
+            {
+                "id": str(uuid.uuid4()),
+                "concept_id": cid,
+                "topic": title or "review",
+                "question": str(q.get("question", "")),
+                "choices": choices[:4],
+                "correct_index": int(q.get("correct_index", 0)) % max(len(choices), 1),
+            }
+        )
+
+    need = 5 - len(quiz_burst)
+    if need > 0:
+        for i in range(need):
+            quiz_burst.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "concept_id": str(pool[0]["id"]) if pool else None,
+                    "topic": "warmup",
+                    "question": f"Warmup {i + 1}: quick retention check — did you review a concept today?",
+                    "choices": ["Not yet", "Skimmed it", "Yes, fully", "Only audio"],
+                    "correct_index": 2,
+                }
+            )
+    return quiz_burst[:5]

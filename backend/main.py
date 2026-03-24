@@ -12,7 +12,7 @@ import logging
 from typing import Any, Literal
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -27,6 +27,7 @@ from agents.ingestion_agent import run_ingestion
 from agents.study_dna_agent import run_study_dna
 from agents.expressive_media_agent import run_meme_pipeline
 from agents.transformation_agent import run_transform
+from api.routes import api_router
 from config import Settings, get_settings
 from db import ensure_demo_user, supabase_client
 from elevenlabs_client import synthesize_speech
@@ -35,6 +36,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Crambly API", version="0.1.0")
+
+app.include_router(api_router, prefix="/api")
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,6 +50,7 @@ app.add_middleware(
 
 class SyllabusTextBody(BaseModel):
     text: str
+    course_id: str | None = None
 
 
 class TransformBody(BaseModel):
@@ -113,8 +117,10 @@ def health() -> dict[str, str]:
 
 @app.post("/api/upload")
 async def api_upload(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     file_type: str = Form("pdf"),
+    course_id: str | None = Form(None),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     user_id = str(settings.crambly_demo_user_id)
@@ -124,22 +130,35 @@ async def api_upload(
     ft = file_type.lower().strip()
     if ft not in {"pdf", "image", "audio", "text"}:
         raise HTTPException(400, "file_type must be pdf|image|audio|text")
+    cid = (course_id or "").strip() or None
     try:
-        return run_ingestion(
+        result = run_ingestion(
             user_id=user_id,
             file_name=file.filename or "upload",
             file_bytes=data,
             file_type=ft,
             content_type=file.content_type,
+            course_id=cid,
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("upload failed")
         raise HTTPException(500, str(e)) from e
+    upload_id = str(result.get("upload_id", ""))
+    if upload_id:
+        from tasks.orchestrator import prepare_study_deck_row, run_study_deck_workers
+
+        try:
+            prepare_study_deck_row(upload_id, user_id, reset=False)
+            background_tasks.add_task(run_study_deck_workers, upload_id, user_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("study_deck kickoff failed (table missing?)", exc_info=True)
+    return result
 
 
 @app.post("/api/syllabus")
 async def api_syllabus(
     file: UploadFile | None = File(None),
+    course_id: str | None = Form(None),
     settings: Settings = Depends(get_settings),
 ) -> list[dict[str, Any]]:
     user_id = str(settings.crambly_demo_user_id)
@@ -149,12 +168,14 @@ async def api_syllabus(
     if not data:
         raise HTTPException(400, "Empty syllabus")
     mime = file.content_type or "application/pdf"
+    cid = (course_id or "").strip() or None
     try:
         return run_deadline_from_bytes(
             user_id=user_id,
             file_name=file.filename or "syllabus.pdf",
             file_bytes=data,
             content_type=mime,
+            course_id=cid,
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("syllabus failed")
@@ -167,8 +188,9 @@ def api_syllabus_text(
     settings: Settings = Depends(get_settings),
 ) -> list[dict[str, Any]]:
     user_id = str(settings.crambly_demo_user_id)
+    cid = (body.course_id or "").strip() or None
     try:
-        return run_deadline_from_text(user_id=user_id, syllabus_text=body.text)
+        return run_deadline_from_text(user_id=user_id, syllabus_text=body.text, course_id=cid)
     except Exception as e:  # noqa: BLE001
         logger.exception("syllabus text failed")
         raise HTTPException(500, str(e)) from e
@@ -190,15 +212,95 @@ def api_transform(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     user_id = str(settings.crambly_demo_user_id)
+    ensure_demo_user()
+
+    allowed_modes = {"adhd", "visual", "global_scholar", "audio", "exam_cram"}
+    mode_key = body.mode if body.mode in allowed_modes else "adhd"
+    dial_key = "null" if body.complexity_dial is None else f"{float(body.complexity_dial):.3f}"
+    cache_key = f"{mode_key}|{dial_key}"
+
     try:
-        return run_transform(
+        sb = supabase_client()
+        study_cache: dict[str, Any] = {}
+        use_cache = True
+        try:
+            upload_row = (
+                sb.table("uploads")
+                .select("study_cache")
+                .eq("id", body.upload_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if upload_row.data:
+                maybe_cache = upload_row.data[0].get("study_cache")
+                if isinstance(maybe_cache, dict):
+                    study_cache = maybe_cache
+        except Exception:
+            # Column might not exist yet (migration not applied). Keep app usable.
+            use_cache = False
+            logger.warning("study_cache unavailable; running transform without cache", exc_info=True)
+
+        if use_cache:
+            cached_payload = study_cache.get(cache_key)
+            if isinstance(cached_payload, dict):
+                graph = cached_payload.get("concept_graph")
+                has_graph = (
+                    isinstance(graph, dict)
+                    and isinstance(graph.get("nodes"), list)
+                    and len(graph.get("nodes") or []) > 0
+                )
+                # Backfill old cache entries that were generated before graph improvements.
+                # If cached payload has no graph, regenerate once and refresh cache.
+                if not has_graph:
+                    logger.info("Cached transform has no graph; regenerating upload=%s", body.upload_id)
+                else:
+                    # Update learner_mode/dial so the deck "remembers" the last viewed mode,
+                    # even when we serve from cache.
+                    sb.table("uploads").update(
+                        {"learner_mode": mode_key, "complexity_dial": body.complexity_dial},
+                    ).eq("id", body.upload_id).eq("user_id", user_id).execute()
+                    return cached_payload
+
+        payload = run_transform(
             user_id=user_id,
             upload_id=body.upload_id,
-            learner_mode=body.mode,
+            learner_mode=mode_key,
             complexity_dial=body.complexity_dial,
         )
+
+        if use_cache:
+            study_cache[cache_key] = payload
+            sb.table("uploads").update({"study_cache": study_cache}).eq("id", body.upload_id).eq("user_id", user_id).execute()
+        return payload
     except Exception as e:  # noqa: BLE001
         logger.exception("transform failed")
+        raise HTTPException(500, str(e)) from e
+
+
+@app.get("/api/upload-meta/{upload_id}")
+def api_upload_meta(upload_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    user_id = str(settings.crambly_demo_user_id)
+    if not upload_id.strip():
+        raise HTTPException(400, "upload_id required")
+    try:
+        ensure_demo_user()
+        sb = supabase_client()
+        res = (
+            sb.table("uploads")
+            .select("learner_mode,complexity_dial")
+            .eq("id", upload_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(404, "upload not found")
+        row = res.data[0]
+        return {"learner_mode": row.get("learner_mode"), "complexity_dial": row.get("complexity_dial")}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
         raise HTTPException(500, str(e)) from e
 
 
@@ -270,6 +372,17 @@ def api_uploads(uid: str, settings: Settings = Depends(get_settings)) -> list[di
         n = int(cnt.count or 0)
         row = dict(u)
         row["concepts_count"] = n
+        if u.get("course_id"):
+            cr = (
+                sb.table("courses")
+                .select("code,name")
+                .eq("id", str(u["course_id"]))
+                .limit(1)
+                .execute()
+            )
+            if cr.data:
+                row["course_code"] = cr.data[0].get("code")
+                row["course_name"] = cr.data[0].get("name")
         out.append(row)
     return out
 

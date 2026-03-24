@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     supabase_upload_bucket: str = "uploads"
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
+    youtube_api_key: str = ""
     # Empty = skip Redis (demo-friendly). Set e.g. redis://localhost:6379/0 when you run a worker queue.
     redis_url: str = ""
 

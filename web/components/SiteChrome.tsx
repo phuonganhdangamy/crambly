@@ -5,6 +5,7 @@ const links = [
   { href: "/upload", label: "Upload" },
   { href: "/mode", label: "Mode" },
   { href: "/library", label: "Library" },
+  { href: "/courses", label: "Courses" },
   { href: "/syllabus", label: "Syllabus" },
 ];
 
@@ -12,7 +13,7 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
           <Link href="/" className="text-lg font-semibold tracking-tight text-white">
             Crambly
           </Link>
@@ -29,7 +30,7 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-4 py-10">{children}</main>
+      <main className="mx-auto max-w-6xl px-4 py-10">{children}</main>
     </div>
   );
 }
