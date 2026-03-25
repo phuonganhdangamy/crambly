@@ -1,9 +1,10 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { useChrome } from "./ChromeContext";
 
 const LS_FIRST = "crambly_sidebar_animated_v1";
@@ -140,16 +141,32 @@ function IconSun({ className }: { className?: string }) {
   );
 }
 
-const NAV = [
-  { href: "/", label: "Dashboard", Icon: IconHome },
-  { href: "/library", label: "My Library", Icon: IconGrid },
-  { href: "/courses", label: "Courses", Icon: IconCourses },
-  { href: "/syllabus", label: "Syllabus", Icon: IconSyllabus },
-  { href: "/mode", label: "Study DNA", Icon: IconBrain },
-  { href: "/upload", label: "Expressive Media", Icon: IconSparkles },
-  { href: "/focus", label: "Focus Mode", Icon: IconEye },
-  { href: "/settings/notifications", label: "Email alerts", Icon: IconBell },
-] as const;
+type NavEntry =
+  | { kind: "section"; label: string }
+  | { kind: "link"; href: string; label: string; Icon: React.ComponentType<{ className?: string }> }
+  | { kind: "disabled"; label: string; Icon: React.ComponentType<{ className?: string }> };
+
+const NAV_ENTRIES: NavEntry[] = [
+  { kind: "link", href: "/", label: "Dashboard", Icon: IconHome },
+  { kind: "section", label: "Learn" },
+  { kind: "link", href: "/library", label: "My Library", Icon: IconGrid },
+  { kind: "link", href: "/courses", label: "Courses", Icon: IconCourses },
+  { kind: "link", href: "/syllabus", label: "Syllabus", Icon: IconSyllabus },
+  { kind: "section", label: "Study" },
+  { kind: "link", href: "/focus", label: "Focus Mode", Icon: IconEye },
+  { kind: "link", href: "/upload", label: "Expressive Media", Icon: IconSparkles },
+  { kind: "section", label: "Personalize" },
+  { kind: "link", href: "/mode", label: "Study DNA", Icon: IconBrain },
+  { kind: "section", label: "Settings" },
+  { kind: "link", href: "/settings/notifications", label: "Email Alerts", Icon: IconBell },
+  { kind: "disabled", label: "Community", Icon: IconUsers },
+];
+
+function navLinkActive(pathname: string, href: string): boolean {
+  if (href === "/") return pathname === "/";
+  if (href === "/library") return pathname === "/library" || pathname.startsWith("/study");
+  return pathname.startsWith(href);
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -172,6 +189,7 @@ export function Sidebar() {
   }, [hydrated]);
 
   const itemDelay = reduceMotion ? 0 : 0.05;
+  const logoSrc = lightMode ? "/crambly-logo-light.png" : "/crambly-logo-dark.png";
 
   return (
     <motion.aside
@@ -184,63 +202,99 @@ export function Sidebar() {
       <div className={`flex h-14 items-center border-b border-[var(--color-border-default)] px-3 ${expanded ? "justify-start gap-2" : "justify-center"}`}>
         <Link
           href="/"
-          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[var(--radius-md)] font-bold text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-tertiary)]"
+          className={`flex min-h-[44px] items-center rounded-[var(--radius-md)] transition-colors hover:bg-[var(--color-bg-tertiary)] ${expanded ? "min-w-0 flex-1 justify-start px-1" : "min-w-[44px] justify-center"}`}
           aria-label="Crambly home"
+          title={!expanded ? "Crambly home" : undefined}
         >
           {expanded ? (
-            <span className="text-lg tracking-tight">
-              Cram<span className="text-[var(--color-accent-cyan)]">bly</span>
-            </span>
+            <div className="relative h-8 w-full max-w-[188px] shrink-0">
+              <Image
+                src={logoSrc}
+                alt="Crambly"
+                fill
+                className="object-contain object-left"
+                sizes="188px"
+                priority
+              />
+            </div>
           ) : (
-            <span className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-accent-cyan)] text-sm font-bold text-[#0d1117]">
-              C
-            </span>
+            <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-[var(--radius-md)]">
+              <Image
+                src={logoSrc}
+                alt=""
+                fill
+                className="object-cover object-left"
+                sizes="36px"
+                priority
+              />
+            </div>
           )}
         </Link>
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 p-2">
-        {NAV.map(({ href, label, Icon }, i) => {
-          const active =
-            pathname === href ||
-            (href === "/library" && pathname.startsWith("/study")) ||
-            (href !== "/" && href !== "/library" && pathname.startsWith(href));
-          return (
-            <motion.div
-              key={href}
-              initial={{ opacity: 0, x: -8 }}
-              animate={staggerGate ? { opacity: 1, x: 0 } : { opacity: 0, x: -8 }}
-              transition={{ delay: staggerGate ? i * itemDelay : 0, duration: reduceMotion ? 0 : 0.22 }}
-            >
-              <Link
-                href={href}
-                className={`relative flex min-h-[44px] items-center gap-3 rounded-[var(--radius-md)] px-3 transition-[background,color] duration-150 ${
-                  active
-                    ? "bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] before:absolute before:left-0 before:top-1/2 before:h-8 before:w-[3px] before:-translate-y-1/2 before:rounded-r before:bg-[var(--color-accent-cyan)]"
-                    : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)]"
-                } ${expanded ? "" : "justify-center px-0"}`}
-                title={!expanded ? label : undefined}
-              >
-                <Icon
-                  className={`shrink-0 ${active ? "text-[var(--color-accent-cyan)]" : "text-current"}`}
-                />
-                {expanded && <span className="truncate text-sm font-medium">{label}</span>}
-              </Link>
-            </motion.div>
-          );
-        })}
+        {(() => {
+          let motionIndex = 0;
+          return NAV_ENTRIES.map((entry) => {
+            if (entry.kind === "section") {
+              if (!expanded) return null;
+              return (
+                <div
+                  key={`section-${entry.label}`}
+                  className="mt-2 flex h-[28px] items-end px-4 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-muted)]"
+                >
+                  {entry.label}
+                </div>
+              );
+            }
 
-        <motion.div
-          initial={{ opacity: 0, x: -8 }}
-          animate={staggerGate ? { opacity: 1, x: 0 } : {}}
-          transition={{ delay: staggerGate ? NAV.length * itemDelay : 0, duration: reduceMotion ? 0 : 0.22 }}
-          className={`mt-1 flex min-h-[44px] items-center gap-3 rounded-[var(--radius-md)] px-3 text-[var(--color-text-muted)] ${expanded ? "" : "justify-center px-0"}`}
-          aria-disabled="true"
-          title="Coming soon"
-        >
-          <IconUsers className="shrink-0 opacity-50" />
-          {expanded && <span className="text-sm font-medium">Community</span>}
-        </motion.div>
+            if (entry.kind === "link") {
+              const { href, label, Icon } = entry;
+              const i = motionIndex++;
+              const active = navLinkActive(pathname, href);
+              return (
+                <motion.div
+                  key={href}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={staggerGate ? { opacity: 1, x: 0 } : { opacity: 0, x: -8 }}
+                  transition={{ delay: staggerGate ? i * itemDelay : 0, duration: reduceMotion ? 0 : 0.22 }}
+                >
+                  <Link
+                    href={href}
+                    className={`relative flex min-h-[44px] items-center gap-3 rounded-[var(--radius-md)] px-3 transition-[background,color] duration-150 ${
+                      active
+                        ? "bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] before:absolute before:left-0 before:top-1/2 before:h-8 before:w-[3px] before:-translate-y-1/2 before:rounded-r before:bg-[var(--color-accent-cyan)]"
+                        : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)]"
+                    } ${expanded ? "" : "justify-center px-0"}`}
+                    title={!expanded ? label : undefined}
+                  >
+                    <Icon
+                      className={`shrink-0 ${active ? "text-[var(--color-accent-cyan)]" : "text-current"}`}
+                    />
+                    {expanded && <span className="truncate text-sm font-medium">{label}</span>}
+                  </Link>
+                </motion.div>
+              );
+            }
+
+            const { label, Icon } = entry;
+            const i = motionIndex++;
+            return (
+              <motion.div
+                key="community"
+                initial={{ opacity: 0, x: -8 }}
+                animate={staggerGate ? { opacity: 1, x: 0 } : { opacity: 0, x: -8 }}
+                transition={{ delay: staggerGate ? i * itemDelay : 0, duration: reduceMotion ? 0 : 0.22 }}
+                className={`flex min-h-[44px] cursor-not-allowed items-center gap-3 rounded-[var(--radius-md)] px-3 text-[var(--color-text-muted)] opacity-50 ${expanded ? "" : "justify-center px-0"}`}
+                aria-disabled="true"
+                title={!expanded ? label : "Coming soon"}
+              >
+                <Icon className="shrink-0" />
+                {expanded && <span className="truncate text-sm font-medium">{label}</span>}
+              </motion.div>
+            );
+          });
+        })()}
       </nav>
 
       <div className="mt-auto space-y-3 border-t border-[var(--color-border-default)] p-3">

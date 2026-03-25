@@ -34,8 +34,23 @@ function TextWithInlineBold({ text }: { text: string }) {
   return <span className="whitespace-pre-wrap">{nodes}</span>;
 }
 
-export function MathRichText({ text, className }: { text: string; className?: string }) {
+export function MathRichText({
+  text,
+  className,
+  /** Use theme text color for body + KaTeX (e.g. worked-example card in light mode). */
+  inheritThemeColor = false,
+}: {
+  text: string;
+  className?: string;
+  inheritThemeColor?: boolean;
+}) {
   const segments = useMemo(() => splitMathSegments(text), [text]);
+  const mathBlock = inheritThemeColor
+    ? "my-3 block overflow-x-auto text-[var(--color-text-primary)] [&_.katex]:text-[var(--color-text-primary)]"
+    : "my-3 block overflow-x-auto text-slate-100 [&_.katex]:text-slate-100";
+  const mathInline = inheritThemeColor
+    ? "inline [&_.katex]:text-[var(--color-text-primary)]"
+    : "inline [&_.katex]:text-indigo-100";
 
   return (
     <span className={className}>
@@ -45,13 +60,13 @@ export function MathRichText({ text, className }: { text: string; className?: st
         }
         if (seg.kind === "block") {
           return (
-            <span key={idx} className="my-3 block overflow-x-auto text-slate-100 [&_.katex]:text-slate-100">
+            <span key={idx} className={mathBlock}>
               <BlockMath math={seg.math} errorColor="#f87171" />
             </span>
           );
         }
         return (
-          <span key={idx} className="inline [&_.katex]:text-indigo-100">
+          <span key={idx} className={mathInline}>
             <InlineMath math={seg.math} errorColor="#f87171" />
           </span>
         );

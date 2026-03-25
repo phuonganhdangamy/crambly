@@ -45,6 +45,14 @@
   --shadow-neon-lime: 0 0 12px #7ee78733;
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
 
+  /* Worked-example callout (study / concept detail) */
+  --worked-example-bg: rgba(30, 27, 75, 0.4);
+  --worked-example-border: rgba(99, 102, 241, 0.3);
+  --worked-example-divider: rgba(99, 102, 241, 0.2);
+  --worked-example-header-hover: rgba(49, 46, 129, 0.35);
+  --worked-example-label: #a5b4fc;
+  --worked-example-action: #818cf8;
+
   /* Transitions */
   --transition-fast: 150ms ease;
   --transition-base: 250ms ease;
@@ -81,4 +89,11 @@ html.light-mode {
   --shadow-neon-cyan: 0 0 0 1px #0969da22;
   --shadow-neon-lime: 0 0 0 1px #1a7f3722;
   --shadow-card: 0 1px 3px rgba(31, 35, 40, 0.12);
+
+  --worked-example-bg: #e8ecff;
+  --worked-example-border: #6366f1;
+  --worked-example-divider: #c7d2fe;
+  --worked-example-header-hover: rgba(99, 102, 241, 0.14);
+  --worked-example-label: #3730a3;
+  --worked-example-action: #4338ca;
 }
