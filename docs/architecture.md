@@ -50,7 +50,7 @@ flowchart LR
 
 | Layer | Role |
 |-------|------|
-| **Next.js (`web/`)** | Library, study hub, courses, syllabus, transforms (streaming), settings. Uses TanStack Query + Supabase JS client (anon key + Realtime). Calls FastAPI via `NEXT_PUBLIC_API_URL`. |
+| **Next.js (`web/`)** | Library, study hub, courses, syllabus, transforms (streaming), settings, email-notification prefs. Uses TanStack Query + Supabase JS client (anon key + Realtime). Calls FastAPI via `NEXT_PUBLIC_API_URL`. **Theming**: CSS variables in `web/styles/tokens.css`; optional **light mode** toggles `html.light-mode` (see [frontend-web.md](./frontend-web.md)). |
 | **FastAPI (`backend/main.py`)** | HTTP API: upload, syllabus/deadline, transforms, preferences, TTS, meme pipeline, deck kick/delete, pulse, etc. Mounts `api/routes.py` at `/api`. |
 | **`backend/api/routes.py`** | Additional REST: courses, deck generate/delete, quiz burst, meme regenerate, notification preferences. |
 | **`backend/agents/`** | LLM-heavy workflows: ingestion, transformation, deadline, delivery pulse, digital twin, study DNA, expressive media (meme). |
@@ -64,8 +64,8 @@ There is no full auth UI in the MVP path: the backend uses a fixed **demo user U
 
 ## Configuration
 
-- **Backend**: `backend/config.py` + Pydantic `Settings` reads repo-root `.env` (and `backend/.env` if present).
-- **Web**: `.env.local` in `web/` for Next.js public env vars.
+- **Backend**: `backend/config.py` + Pydantic `Settings` reads repo-root `.env` (and `backend/.env` if present). Optional **Imgflip** credentials enable fast classic-meme captions from `expressive_media_agent`; without them, the pipeline falls back to Gemini image or local SVG.
+- **Web**: `.env.local` in `web/` for Next.js public env vars (`NEXT_PUBLIC_API_URL`, Supabase anon URL/key, demo user id, etc.).
 
 ## Deployment shape (typical)
 

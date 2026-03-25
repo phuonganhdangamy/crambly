@@ -83,6 +83,8 @@ export default function FocusReaderPage() {
   const [originalView, setOriginalView] = useState<{ url: string; file_type: string; file_name: string } | null>(null);
   const [originalViewError, setOriginalViewError] = useState<string | null>(null);
   const [focusPane, setFocusPane] = useState<"original" | "text">("text");
+  /** Desktop heatmap rail: default collapsed (slim progress strip). */
+  const [heatmapCollapsed, setHeatmapCollapsed] = useState(true);
   const pendingReadingScrollRef = useRef(false);
   const readingScrollElapsedSecRef = useRef(0);
 
@@ -375,98 +377,108 @@ export default function FocusReaderPage() {
   const courseColor = uploadMeta?.course_color || "var(--color-accent-cyan)";
   const courseCode = uploadMeta?.course_code || "—";
 
+  const showFocusSubnav = Boolean(originalView);
+  const heatmapRailCollapsedPx = 48;
+  const heatmapRailExpandedPx = 300;
+  const heatmapRailWidthPx = heatmapCollapsed ? heatmapRailCollapsedPx : heatmapRailExpandedPx;
+  /** Sticky chrome height: progress (2px) + header (48px) + optional sub-nav (52px) */
+  const focusChromeHeightPx = showFocusSubnav ? 102 : 50;
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4 }}
-      className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]"
     >
       <div
-        className="pointer-events-none fixed left-0 right-0 top-0 z-[100] h-0.5 bg-[var(--color-bg-tertiary)]"
-        aria-hidden
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain pb-24 md:pb-10"
       >
-        <div
-          className="h-full bg-[var(--color-accent-cyan)] transition-[width] duration-150 ease-out"
-          style={{ width: `${Math.min(100, progress * 100)}%` }}
-        />
-      </div>
-
-      <header className="fixed left-0 right-0 top-[2px] z-50 flex h-12 items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-primary)]/95 px-3 backdrop-blur-sm md:px-6">
-        <button
-          type="button"
-          onClick={handleExit}
-          className="shrink-0 rounded-md px-2 py-1.5 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text-primary)] md:px-3"
-        >
-          ← Exit
-        </button>
-        <div className="min-w-0 flex-1 text-center">
-          <p className="truncate text-sm font-medium md:text-base">
-            {uploadMeta?.file_name || "Reading"}
-          </p>
-          <span
-            className="mt-0.5 inline-block max-w-full truncate rounded-full px-2 py-0.5 text-[10px] font-medium text-[var(--color-bg-primary)] md:text-xs"
-            style={{ background: courseColor }}
-          >
-            {courseCode}
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2 md:gap-3">
-          <div
-            className={`hidden font-mono text-xs md:block ${sessionGoal != null ? "text-[var(--color-accent-cyan)]" : "text-[var(--color-text-muted)]"}`}
-            title="Session timer"
-          >
-            {sessionGoal != null && remainingSec != null ? (
-              <span>{formatClock(Math.max(0, remainingSec))} remaining</span>
-            ) : (
-              <span>{formatClock(Math.floor(elapsedMs / 1000))}</span>
-            )}
+        <div className="sticky top-0 z-30 border-b border-[var(--color-border-default)] bg-[var(--color-bg-primary)] shadow-[0_6px_16px_-8px_rgba(0,0,0,0.45)]">
+          <div className="pointer-events-none h-0.5 w-full bg-[var(--color-bg-tertiary)]" aria-hidden>
+            <div
+              className="h-full bg-[var(--color-accent-cyan)] transition-[width] duration-150 ease-out"
+              style={{ width: `${Math.min(100, progress * 100)}%` }}
+            />
           </div>
-          <button
-            type="button"
-            onClick={toggleSmartNudges}
-            className="hidden items-center gap-1.5 rounded-full border border-[var(--color-border-default)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)] hover:border-[var(--color-accent-cyan)] md:inline-flex"
-            title="When on, Crambly will suggest help automatically when you seem stuck on a paragraph."
-          >
-            Smart nudges
-            <span className={smartNudgesEnabled ? "text-[var(--color-accent-cyan)]" : ""}>
-              {smartNudgesEnabled ? "ON" : "OFF"}
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-label="Smart nudges"
-            onClick={toggleSmartNudges}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border-default)] text-[var(--color-text-secondary)] md:hidden"
-            title="Smart nudges"
-          >
-            {smartNudgesEnabled ? "●" : "○"}
-          </button>
-          <button
-            type="button"
-            aria-label="Light mode"
-            onClick={() => setLightMode(!lightMode)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border-default)] text-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-            title="Light mode — bright background"
-          >
-            {lightMode ? "☀" : "☾"}
-          </button>
-        </div>
-      </header>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pt-[52px]">
-        <div className="mx-auto flex max-w-[1400px] flex-col gap-6 px-4 py-8 md:flex-row md:gap-6 md:px-12">
-          <div className="min-w-0 flex-[0.65]">
-            {originalView && (
-              <div className="mb-6 flex flex-wrap gap-2 border-b border-[var(--color-border-default)] pb-3">
+          <header className="flex h-12 items-center gap-2 bg-[var(--color-bg-primary)]/98 px-3 backdrop-blur-sm md:px-6">
+            <button
+              type="button"
+              onClick={handleExit}
+              className="shrink-0 rounded-md px-2 py-1.5 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text-primary)] md:px-3"
+            >
+              ← Exit
+            </button>
+            <div className="min-w-0 flex-1 text-center">
+              <p className="truncate text-sm font-medium md:text-base">
+                {uploadMeta?.file_name || "Reading"}
+              </p>
+              <span
+                className="mt-0.5 inline-block max-w-full truncate rounded-full px-2 py-0.5 text-[10px] font-medium text-[var(--color-bg-primary)] md:text-xs"
+                style={{ background: courseColor }}
+              >
+                {courseCode}
+              </span>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 md:gap-3">
+              <div
+                className={`hidden font-mono text-xs md:block ${sessionGoal != null ? "text-[var(--color-accent-cyan)]" : "text-[var(--color-text-muted)]"}`}
+                title="Session timer"
+              >
+                {sessionGoal != null && remainingSec != null ? (
+                  <span>{formatClock(Math.max(0, remainingSec))} remaining</span>
+                ) : (
+                  <span>{formatClock(Math.floor(elapsedMs / 1000))}</span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={toggleSmartNudges}
+                className="hidden items-center gap-1.5 rounded-full border border-[var(--color-border-default)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)] hover:border-[var(--color-accent-cyan)] md:inline-flex"
+                title="When on, Crambly will suggest help automatically when you seem stuck on a paragraph."
+              >
+                Smart nudges
+                <span className={smartNudgesEnabled ? "text-[var(--color-accent-cyan)]" : ""}>
+                  {smartNudgesEnabled ? "ON" : "OFF"}
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-label="Smart nudges"
+                onClick={toggleSmartNudges}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border-default)] text-[var(--color-text-secondary)] md:hidden"
+                title="Smart nudges"
+              >
+                {smartNudgesEnabled ? "●" : "○"}
+              </button>
+              <button
+                type="button"
+                aria-label="Light mode"
+                onClick={() => setLightMode(!lightMode)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border-default)] text-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                title="Light mode — bright background"
+              >
+                {lightMode ? "☀" : "☾"}
+              </button>
+            </div>
+          </header>
+
+          {showFocusSubnav ? (
+            <nav
+              className="flex h-[52px] items-center border-t border-[var(--color-border-default)] bg-[var(--color-bg-primary)]/98 backdrop-blur-md"
+              aria-label="Reading mode"
+            >
+              <div className="mx-auto flex h-full w-full max-w-[1400px] items-center gap-2 px-4 md:px-12">
                 <button
                   type="button"
                   onClick={() => setFocusPane("original")}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                     focusPane === "original"
-                      ? "bg-[var(--color-accent-cyan)] text-[var(--color-bg-primary)]"
-                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)]"
+                      ? "bg-[var(--color-accent-cyan)] text-white shadow-[var(--shadow-neon-cyan)]"
+                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text-primary)]"
                   }`}
                 >
                   Original file
@@ -477,8 +489,8 @@ export default function FocusReaderPage() {
                   title="Smart assistance available here"
                   className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                     focusPane === "text"
-                      ? "bg-[var(--color-accent-cyan)] text-[var(--color-bg-primary)]"
-                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)]"
+                      ? "bg-[var(--color-accent-cyan)] text-white shadow-[var(--shadow-neon-cyan)]"
+                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text-primary)]"
                   }`}
                 >
                   <span className="inline-flex items-center gap-1.5">
@@ -487,8 +499,14 @@ export default function FocusReaderPage() {
                   </span>
                 </button>
               </div>
-            )}
+            </nav>
+          ) : null}
+        </div>
 
+        <div className="flex flex-row items-start">
+          <div className="min-w-0 flex-1">
+            <div className="flex w-full justify-center px-4 py-6 md:px-8 md:py-8">
+              <div className="w-full max-w-[900px]">
             {originalViewError && !originalView && (
               <p className="mb-4 text-xs text-[var(--color-text-muted)]">{originalViewError}</p>
             )}
@@ -570,8 +588,20 @@ export default function FocusReaderPage() {
                 ) : null}
               </>
             )}
+              </div>
+            </div>
           </div>
-          <div className="hidden min-w-0 flex-[0.35] md:block">
+
+          <aside
+            className="pointer-events-auto sticky z-20 hidden min-h-0 shrink-0 flex-col overflow-hidden border-l border-[var(--color-border-default)] bg-[var(--color-bg-secondary)]/95 backdrop-blur-md transition-[width] duration-200 ease-out md:flex"
+            style={{
+              width: heatmapRailWidthPx,
+              top: focusChromeHeightPx,
+              alignSelf: "flex-start",
+              maxHeight: `calc(100dvh - ${focusChromeHeightPx}px)`,
+              height: `calc(100dvh - ${focusChromeHeightPx}px)`,
+            }}
+          >
             <FrictionHeatmap
               sections={sectionsForHeatmap}
               frictionScores={frictionScores}
@@ -579,8 +609,11 @@ export default function FocusReaderPage() {
               sectionsReviewed={sectionsReviewed}
               simplifiedIds={simplifiedIds}
               onSectionClick={scrollToFrictionTarget}
+              docked
+              collapsed={heatmapCollapsed}
+              onCollapsedChange={setHeatmapCollapsed}
             />
-          </div>
+          </aside>
         </div>
       </div>
 

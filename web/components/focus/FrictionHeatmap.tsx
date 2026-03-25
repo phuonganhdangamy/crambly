@@ -55,6 +55,9 @@ export function FrictionHeatmap({
   sectionsReviewed,
   simplifiedIds,
   onSectionClick,
+  collapsed: collapsedProp,
+  onCollapsedChange,
+  docked = false,
 }: {
   sections: FocusSection[];
   frictionScores: Record<string, number>;
@@ -62,8 +65,18 @@ export function FrictionHeatmap({
   sectionsReviewed: string[];
   simplifiedIds: Record<string, boolean>;
   onSectionClick: (blockId: string) => void;
+  /** Controlled collapsed state (slim progress rail vs full heatmap). */
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
+  /** When true, fills a fixed parent rail (no sticky / floating card). */
+  docked?: boolean;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [internalCollapsed, setInternalCollapsed] = useState(true);
+  const collapsed = collapsedProp !== undefined ? collapsedProp : internalCollapsed;
+  function setCollapsed(next: boolean) {
+    onCollapsedChange?.(next);
+    if (collapsedProp === undefined) setInternalCollapsed(next);
+  }
 
   const mostTimeId = useMemo(() => {
     let best = "";
@@ -82,12 +95,18 @@ export function FrictionHeatmap({
 
   return (
     <motion.div
-      layout
-      className="sticky top-16 z-10 max-h-[calc(100vh-80px)] overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-4"
-      style={{ width: collapsed ? 32 : "100%" }}
+      layout={!docked}
+      className={`flex h-full min-h-0 w-full flex-col ${
+        docked
+          ? "bg-transparent p-2"
+          : "sticky top-16 z-10 max-h-[calc(100vh-80px)] overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-4"
+      }`}
+      style={docked ? undefined : { width: collapsed ? 40 : "100%" }}
       transition={{ duration: 0.25 }}
     >
-      <div className={`mb-3 flex items-start gap-2 ${collapsed ? "flex-col items-center" : ""}`}>
+      <div
+        className={`mb-2 flex shrink-0 items-start gap-2 ${collapsed ? "flex-col items-center" : ""} ${docked && collapsed ? "items-center" : ""}`}
+      >
         {!collapsed && (
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Reading heatmap</h3>
@@ -97,15 +116,15 @@ export function FrictionHeatmap({
         <button
           type="button"
           aria-label={collapsed ? "Expand heatmap" : "Collapse heatmap"}
-          onClick={() => setCollapsed((c) => !c)}
-          className="ml-auto shrink-0 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+          onClick={() => setCollapsed(!collapsed)}
+          className={`shrink-0 rounded-md p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text-primary)] ${docked && collapsed ? "" : collapsed ? "" : "ml-auto"}`}
         >
           {collapsed ? "◀" : "▶"}
         </button>
       </div>
 
       {collapsed ? (
-        <div className="flex flex-col items-center gap-2 py-2">
+        <div className="flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto py-1">
           {sections.map((s) => {
             const sc = frictionScores[s.id] ?? 0;
             const sim = Boolean(simplifiedIds[s.id]);
@@ -123,7 +142,7 @@ export function FrictionHeatmap({
           })}
         </div>
       ) : (
-        <ul className="space-y-3">
+        <ul className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
           {sections.map((s) => {
             const sc = frictionScores[s.id] ?? 0;
             const sim = Boolean(simplifiedIds[s.id]);
@@ -162,7 +181,7 @@ export function FrictionHeatmap({
       )}
 
       {!collapsed && (
-        <div className="mt-4 border-t border-[var(--color-border-default)] pt-3 text-xs text-[var(--color-text-secondary)]">
+        <div className="mt-4 shrink-0 border-t border-[var(--color-border-default)] pt-3 text-xs text-[var(--color-text-secondary)]">
           <p>
             {sectionsReviewed.length} / {sections.length} sections visited
           </p>

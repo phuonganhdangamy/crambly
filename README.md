@@ -2,9 +2,11 @@
 
 > Your notes, adapted to your brain.
 
-A cross-platform AI study companion that ingests academic material on desktop, transforms it into personalized learning formats, and delivers adaptive active learning on mobile — based on each student's cognitive patterns.
+An AI study companion that ingests academic material on **desktop** (Next.js), transforms it into personalized formats, and supports active review in the browser — with personalization driven by a **Digital Twin**. A **native mobile app** is roadmap-only: the **`mobile/`** Expo project is a scaffold and is **not** feature-complete or part of the tested demo path.
 
 Built for the **Google Developer Group UTSC AI Case Competition 2026**.
+
+**Technical docs** for contributors: [docs/README.md](docs/README.md) (architecture, API, Supabase, agents, implementation flows, frontend notes).
 
 ---
 
@@ -16,10 +18,9 @@ The standard way of studying — reading hundreds of pages, memorizing textbooks
 
 ## The Solution
 
-Crambly is an adaptive learning operating system with two halves:
+**Shipped and demo-ready:** the **desktop web** app — library, study hub (TLDR / Grind / Chill), courses, syllabus, Focus mode, transforms, study deck (meme, audio, games, YouTube), email digests and **email me this lesson**, and notification settings.
 
-- **Desktop** — the Ingestion Hub. Upload anything, pick your mode, get your material transformed.
-- **Mobile** — the Active Learning Hub. Receive daily study pulses, quiz bursts, audio walkthroughs, and meme recaps on the go.
+**Not shipped for this repo:** a production **native mobile** client. The vision is still “ingestion on desktop, nudges and quick review on the phone,” but **everything you can run and test today is in the desktop app** plus the FastAPI backend.
 
 The system learns how you learn over time via a **Digital Twin** — and every output gets sharper the more you use it.
 
@@ -27,7 +28,7 @@ The system learns how you learn over time via a **Digital Twin** — and every o
 
 ## Demo Story
 
-> Amy is a UofT STEM student with ADHD and a 45-minute TTC commute each way. She uploads 120 lecture slides, a syllabus, and some handwritten notes on desktop. Crambly detects she prefers examples over theory and shorter bursts over long reading. It transforms her material into 5-minute mobile challenges, a commute audio recap, and a daily TLDR Pulse based on her exam date. When she gets stuck on torque, the system re-explains it in simpler English with a CN Tower analogy. The next day, it prioritizes torque again because her quiz results showed confusion.
+> Amy is a UofT STEM student with ADHD and a long commute. She uploads 120 lecture slides, a syllabus, and some handwritten notes on **desktop**. Crambly detects she prefers examples over theory and shorter bursts over long reading. It transforms her material into **short study sessions** on the **study hub** (Grind games, deck audio she can play in the browser, summaries in TLDR), optional **email digest**, and deadline-aware priorities from her syllabus. When she gets stuck on torque, the system re-explains it in simpler English with a CN Tower analogy. Her **quiz results** on desktop feed the Digital Twin so the next session can prioritize torque again.
 
 ---
 
@@ -59,14 +60,18 @@ Output formats generated:
 
 ---
 
-### 2. Active Learning Hub (Mobile)
+### 2. Active learning (desktop today)
 
-Turns passive notes into active review:
-- **TLDR Pulse** — a daily personalized study digest based on syllabus deadlines and remaining time. Prevents burnout by breaking hundreds of pages into manageable daily chunks.
-- **Quiz bursts** — 5-minute interactive challenges sent via mobile notification
-- **Podcast / commute mode** — adaptive audio walkthroughs with emphasis on high-importance exam terms
-- **Meme recap feed** — memory encoding through humor and rhythm (emotional salience = higher recall)
-- **Voice tutor** — explains, re-explains, and quizzes in a conversational format
+These are implemented and exercised on **desktop** (study page, deck pipeline, email — not a separate mobile app):
+
+- **TLDR** — summaries, sections, concept graph, deck audio (`AudioPlayer`), meme recap, **Email me this lesson**, transforms
+- **Grind** — **QuizBurst**, **Wordle**, **PuzzleMatch** (short interactive review in the browser — not push notifications)
+- **Chill** — meme + YouTube suggestions; same deck audio story as TLDR
+- **Deck audio** — pipeline TTS / transcript; listen in-page (the “commute” story is “play your recap wherever you open the app,” not a native player app)
+- **Meme recap** — unified TLDR/Chill card + Imgflip / Gemini pipeline
+- **Email** — optional **daily digest** and **exam reminders** (`/settings/notifications`); complements in-app study
+
+**Mobile roadmap (not in this milestone):** native push notifications, Expo app parity, and a **voice tutor** experience packaged for phone — see **`mobile/README.md`**; the folder is a placeholder, not a tested surface.
 
 ---
 
@@ -149,7 +154,10 @@ The main study surface is split into three tabs so dense content is grouped by i
 | **Chill** | Same **meme recap** as TLDR (always the latest client or pipeline image) plus **YouTube** suggestions — no duplicate audio block here. |
 
 **Meme recap (TLDR + Chill in sync)**  
-One shared state drives the meme in both tabs: the UI prefers the newest **client-generated** recap when present, otherwise the **pipeline** meme from `study_deck` (`MemeCard`). Regenerating from either tab updates storage and refreshes the deck so both views stay aligned.
+One shared state drives the meme in both tabs: the UI prefers the newest **client-generated** recap when present, otherwise the **pipeline** meme from `study_deck` (`MemeCard`). Use **Generate Meme Recap**, **New theme**, or **Replace with AI meme** to refresh; there is no second regenerate control on the image itself. Regenerating updates storage and refreshes the deck so TLDR and Chill stay aligned.
+
+**Light mode**  
+The sidebar **Light** toggle (and Focus reader ☀/☾) switches the app to a **bright** palette via `html.light-mode` and CSS variables in `web/styles/tokens.css`. Preference is stored as **`crambly_light_mode`** in `localStorage` (with a small inline script in `layout.tsx` to apply it before first paint).
 
 **Sections & practice**  
 Section cards can be browsed in **Scroll** (full list) or **Carousel** (prev / next, slide counter, dot jumpers) via an in-page toggle.
@@ -164,7 +172,7 @@ A **study deck** row per upload drives async tasks (meme recap, TTS audio, word 
 
 | Component | Role |
 |---|---|
-| `MemeCard` | Displays the generated meme recap for the lecture |
+| `MemeCard` | Pipeline meme: image, title, tone, **Copy image URL**; optional **`showHeader={false}`** when wrapped by the unified meme card |
 | `AudioPlayer` | Plays the TTS / audio walkthrough clip |
 | `YouTubeSuggestions` | Surfaces curated related-video ideas from the deck |
 | `Wordle` | Word-bank game: hints, reveal answer, skip to next word |
@@ -174,6 +182,19 @@ A **study deck** row per upload drives async tasks (meme recap, TTS audio, word 
 
 **Courses**  
 Create courses (name, course code, color), attach uploads, and use the **course hub** (`/courses`, `/courses/[courseId]`) to browse lectures in context. The hub reuses the same study-deck widgets per selected lecture and keeps **Digital Twin** signals (e.g. confusion / weak topics) organized **per course** where the schema supports it.
+
+---
+
+### 8. Email — daily digest & “email me this lesson”
+
+Crambly can reach you by **email** (via **Resend**) when the backend is configured with the right API keys and migrations.
+
+| Feature | What it does |
+|---|---|
+| **Daily digest** | On a schedule (per your **local time** and **digest time** in settings), the app can send a short study email: a concept biased toward weak topics or random review, with Gemini-written copy. **Exam reminders** can also nudge you about upcoming assessments from your syllabus. Toggle digests/reminders, set timezone, and send a **test digest** from **`/settings/notifications`**. The FastAPI **scheduler** (`APScheduler`) runs these jobs in-process when the API is up. |
+| **Email me this lesson** | From the **TLDR** tab on **`/study/[uploadId]`**, use **Email me this lesson** to receive an HTML lesson pack for the current upload: personalized sections from your **study transform cache** (learner mode + complexity dial), plus the **study deck** audio transcript when available, and an **audio attachment** when the deck’s signed audio URL can be fetched. The recipient defaults to the address saved in **notification preferences**, then falls back to a demo email. |
+
+**Setup:** apply the **`notification_preferences`** migration (see Local setup), set **`RESEND_API_KEY`** and related sender/domain vars in `.env` (see `.env.example`), and keep the backend running for scheduled sends.
 
 ---
 
@@ -188,13 +209,14 @@ A real-time slider in the UI that adjusts explanation complexity from **Expert**
 ### Frontend
 | Layer | Technology | Why |
 |---|---|---|
-| Desktop web | Next.js + Tailwind CSS + TypeScript | Library, study hub (STEM graph + `games/` deck widgets), course hub, TanStack Query, Supabase client + Realtime |
-| Mobile | React Native with Expo | Efficient reuse of JS logic |
+| Desktop web | Next.js + Tailwind CSS + TypeScript | Library, study hub (STEM graph + `games/` deck widgets), course hub, Focus mode, TanStack Query, Supabase client + Realtime |
+| Mobile (scaffold) | React Native + Expo in `mobile/` | **Roadmap only** — not feature-parity with web; optional for contributors |
 
 ### Backend
 | Layer | Technology | Why |
 |---|---|---|
 | API | FastAPI | Lightweight, async-friendly |
+| Email | Resend | Transactional mail (daily digest, exam reminders, lesson export) |
 | Database | Supabase (PostgreSQL) | Auth + DB + file storage in one |
 | Caching | Redis | Queue management for agent tasks |
 | Vector search | pgvector (via Supabase) | Semantic search over user content |
@@ -219,7 +241,7 @@ A real-time slider in the UI that adjusts explanation complexity from **Expert**
 | **Transformation Agent** | Rewrites content into ADHD / visual / plain-language / audio / meme modes |
 | **Study DNA Agent** | Extracts style fingerprint from user writing, builds few-shot template |
 | **Digital Twin Agent** | Updates learner profile from quiz results, interaction traces, explicit feedback |
-| **Delivery Agent** | Decides what to send today on mobile based on twin + deadline data |
+| **Delivery Agent** | Builds pulse-style payloads from twin + deadline data (e.g. for API / future clients — **desktop** consumes study + email flows today) |
 | **Voice Tutor Agent** | Explains, quizzes, adapts tone and emphasis in real time |
 | **Expressive Media Agent** | Generates meme / song / podcast / brainrot recap formats |
 
@@ -286,12 +308,15 @@ Step 3 — Student picks mode
 Step 4 — Desktop library & study (optional)
   └── Open an upload: concept graph, summaries, study deck (meme, audio, Wordle, puzzle, quiz burst, YouTube ideas)
   └── Organize uploads into courses and review from the course hub
+  └── Optional: **Email me this lesson** from TLDR; configure **daily digest** / exam reminders under **Email alerts** (`/settings/notifications`)
 
-Step 5 — Mobile delivers adaptive learning
-  └── Daily TLDR Pulse, quiz bursts, audio walkthrough, meme recap, voice tutor
+Step 5 — Keep reviewing on **desktop**
+  └── TLDR / Grind / Chill, deck audio, games, optional **email digest**, **Focus** reading
 
 Step 6 — Digital Twin improves over time
-  └── Notices patterns → adapts tomorrow's plan → Study DNA refines explanations (including per-course signals on desktop)
+  └── Quiz and study signals → reprioritized topics → Study DNA refines explanations (per-course where supported)
+
+_Future step — Native mobile: push notifications, on-device tutor — not implemented in this repo._
 ```
 
 ---
@@ -302,7 +327,7 @@ Commands below use **PowerShell** on **Windows**. Adjust paths if your project l
 
 ### Prerequisites
 
-- **Node.js 18+** and **npm** (for Next.js and Expo)
+- **Node.js 18+** and **npm** (for Next.js; **Expo** only if you open the optional `mobile/` scaffold)
 - **Python 3.11+** (3.12 is fine)
 - A **Supabase** project: run the SQL migrations, create Storage bucket **`uploads`** (see `.env.example`)
 - API keys in **`.env`** at the **repo root** (copy from `.env.example`)
@@ -323,7 +348,7 @@ cd path\to\crambly
 
 ```powershell
 Copy-Item .env.example .env
-# Edit .env: GEMINI_API_KEY, SUPABASE_*, ELEVENLABS_* (if using TTS), NEXT_PUBLIC_API_URL, etc.
+# Edit .env: GEMINI_API_KEY, SUPABASE_*, ELEVENLABS_* (if using TTS), RESEND_* (for email digests / lesson export), NEXT_PUBLIC_API_URL, etc.
 ```
 
 Important for the desktop app:
@@ -406,7 +431,9 @@ npm run dev
 
 Open **http://localhost:3000**.
 
-### 6. Mobile (Expo)
+### 6. Mobile (Expo) — optional scaffold, not the demo
+
+The **`mobile/`** app is **not** aligned with the desktop feature set and **has not** been used for competition testing. Skip this section unless you are experimenting with React Native.
 
 Expo lives in **`mobile/`** with its **own** `node_modules` (not the root workspace).
 
@@ -449,21 +476,23 @@ Then in `.env`: `REDIS_URL=redis://localhost:6379/0` and restart the backend.
 - Desktop upload (PDF, slides, syllabus), personal library, and per-upload **study** view with concept graph
 - Learner mode selection
 - Gemini-powered concept extraction and transformation
-- TLDR Pulse (daily digest)
-- Mobile quiz bursts
+- Study hub TLDR + active formats; optional **email** daily digest (not mobile push)
+- **QuizBurst** (and related deck games) on **desktop** Grind tab
 - Digital Twin (preference storage + weak topic reprioritization)
 - Global Scholar mode (complexity dial)
 
 **Showcase / demo features:**
-- Desktop **study** page: concept graph, worked examples, formula annotations, **study deck** with games (`Wordle`, `PuzzleMatch`, `QuizBurst`, meme, audio, YouTube suggestions)
+- Desktop **study** page: concept graph, worked examples, formula annotations, **study deck** with games (`Wordle`, `PuzzleMatch`, `QuizBurst`, meme, audio, YouTube suggestions), **light mode**, **Email me this lesson** (TLDR)
+- **Email alerts** (`/settings/notifications`): daily digest + exam reminders (**Resend**), test send
 - **Courses** hub: group uploads, per-course study view + deck widgets
 - Study DNA (few-shot from user notes)
 - Explain Like Me
 - Meme recap generator
-- Podcast / commute mode
+- Deck **audio** / TTS in browser (commute-style listening via desktop)
 - CN Tower localized analogy example
 
 **Stretch (post-competition):**
+- **Native mobile** (Expo) with notifications and parity with web study flows
 - Attention-aware training (scroll loop detection)
 - Full gaze tracking via WebGazer.js
 - Multi-language UI
@@ -478,7 +507,7 @@ STEM students at Canadian universities — especially those with ADHD, non-Engli
 
 ## One-Line Pitches
 
-**Product:** Crambly transforms any academic material into personalized learning experiences across desktop and mobile.
+**Product:** Crambly transforms academic material into personalized learning on **desktop** today; mobile is the long-term companion surface.
 
 **Vision:** We're building the operating system for personalized learning — one that adapts not just to the content, but to the student's mind.
 

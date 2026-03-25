@@ -6,7 +6,7 @@
 2. **Course hub (~30s):** Open the **STAB57** course with several lectures already linked. Click **Lecture 3** — the study deck loads instantly (pre-generated). Say: *“Everything Crambly knows about this course, in one place.”*
 3. Grind Mode → play Wordle using your own lecture's key terms
 4. Grind Mode → Puzzle Match (concept ↔ definition)
-5. Chill Mode → Generated meme image + Regenerate button
+5. Chill Mode → Generated meme image; use **Generate Meme Recap** / **New theme** (or **Replace with AI meme** when showing the pipeline card) to refresh — no duplicate floating control on the image
 6. Chill Mode → Audio player → hit Download
 7. Chill Mode → YouTube suggestions mapped to your concepts
 8. Brief architecture overview — mention agents, Digital Twin, Study DNA
@@ -23,3 +23,4 @@ All of the following are built but not demoed live in the 4-minute pitch:
 - Explain Like Me
 - Mobile scaffold (React Native / Expo)
 - Course layer (course hub, scoped syllabus & Digital Twin per course)
+- Desktop **light mode** (sidebar **Light** toggle, bright theme via CSS variables)

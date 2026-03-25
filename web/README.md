@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Crambly web (Next.js)
 
-## Getting Started
+App Router desktop client for Crambly. Product overview and judge narrative: [../README.md](../README.md). Technical detail: [../docs/frontend-web.md](../docs/frontend-web.md).
 
-First, run the development server:
+## Scripts
+
+From the **repo root** (npm workspaces):
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev:web
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+From **`web/`**:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open [http://localhost:3000](http://localhost:3000). The FastAPI backend should be running separately (see root README); set **`NEXT_PUBLIC_API_URL`** (e.g. `http://127.0.0.1:8000`) in **`web/.env.local`**.
 
-## Learn More
+## Layout
 
-To learn more about Next.js, take a look at the following resources:
+- **`app/`** — routes (`/`, `/library`, `/study/[uploadId]`, `/courses`, `/focus`, `/settings/notifications`, …).
+- **`components/`** — UI shell (`SiteChrome`, `Sidebar`), games, focus reader, shared widgets.
+- **`lib/api.ts`** — typed `fetch` helpers to the Python API.
+- **`lib/supabase.ts`** — browser Supabase client + Realtime for **`study_deck`** updates.
+- **`styles/tokens.css`** — CSS variables for **dark** (default) and **`html.light-mode`** (bright theme).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Build
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run build
+npm run start
+```
 
-## Deploy on Vercel
+Lint / typecheck (from `web/`):
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run lint
+npx tsc --noEmit
+```

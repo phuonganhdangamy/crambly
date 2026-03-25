@@ -21,7 +21,9 @@ Orchestration: `tasks/orchestrator.py`.
 3. Each worker **`patch_study_deck`** (`tasks/common.py`): merges `tasks_status` and sets fields (e.g. `audio_url`, `meme_image_url`). Extra string keys (e.g. `audio_provider`) are preserved when merging.
 4. **Frontend**: study/course pages subscribe to **Supabase Realtime** on `study_deck` for that `upload_id` to refresh when tasks complete.
 
-**Re-run**: API routes under `/api/deck/` can regenerate or delete the row; meme has a dedicated regenerate path that may call `run_meme_pipeline` and storage upload.
+**Re-run**: API routes under `/api/deck/` can regenerate or delete the row; **`POST /api/meme/regenerate`** and client **`POST /api/meme`** can call `run_meme_pipeline` and upload to storage. Study UI prefers **unified meme** actions (standard vs **reimagine**) over duplicating controls on **`MemeCard`**.
+
+**Meme templates**: Brief selects an allowed template key; Imgflip path requires credentials (`IMGFLIP_USERNAME` / `IMGFLIP_PASSWORD` in env). Only templates with two caption fields are used for Imgflip so rendered images are complete.
 
 ## 3. Deck audio script (deduplicated TOC)
 
@@ -56,3 +58,9 @@ Client calls transform endpoints with `upload_id`, **learner mode**, optional **
 - **Pulse**: `delivery_agent.build_pulse` aggregated for mobile-style digest.
 - **Quiz**: quiz results POST updates **`digital_twin`** / related tables via `digital_twin_agent.apply_quiz_result`.
 - Exact field shapes evolve with migrations; see `supabase/migrations/` and agent modules.
+
+## 10. Light mode (web only)
+
+1. User toggles **Light** in the sidebar (or ☀/☾ in Focus reader); state lives in **`ChromeContext`** and **`localStorage`** key **`crambly_light_mode`** (`1` = on).
+2. **`document.documentElement`** gets class **`light-mode`**; **`web/styles/tokens.css`** redefines `--color-bg-*`, `--color-text-*`, accents, and shadows for a bright theme.
+3. Root **`layout.tsx`** runs a small inline script before React hydrates so the correct class is applied on first paint (avoids flashing dark then light).

@@ -22,6 +22,7 @@
 | Meme regen | `POST /api/meme/regenerate` | `api/routes.py` |
 | Upload delete | `DELETE /api/upload/{id}` | `api/routes.py` |
 | Notifications | `GET/POST /api/notifications/preferences`, `POST .../test-digest` | `api/routes.py` |
+| Lesson email | `POST /api/uploads/{upload_id}/email-lesson` | `api/routes.py` → `lesson_export` + Resend |
 
 ## Dependencies
 

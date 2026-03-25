@@ -12,7 +12,7 @@ LLM-centric orchestration used from **HTTP routes** or other agents. Examples:
 | `delivery_agent` | Pulse payload, quiz burst assembly |
 | `digital_twin_agent` | Profile updates from quiz/interactions |
 | `study_dna_agent` | Style fingerprint from user writing |
-| `expressive_media_agent` | Meme pipeline (Imgflip / Gemini image) |
+| `expressive_media_agent` | Meme pipeline: Gemini JSON **brief** (template + top/bottom text + image fallback prompt) → **Imgflip** `caption_image` for classic **two-text** templates only, or **Gemini image** for `custom` / when Imgflip is skipped or fails. Templates include e.g. drake, distracted boyfriend, this is fine, change my mind, is this a pigeon (multi-panel Imgflip memes are avoided so captions are not left blank). |
 | `notification_agent` | Email copy + Resend send (not an “agent” in ADK sense, but colocated) |
 
 Shared utilities: **`gemini_client.py`** (text, JSON, embeddings, image REST), **`config.py`**, **`db.py`**.

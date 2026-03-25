@@ -1,5 +1,7 @@
 # Mobile (React Native + Expo)
 
-Post-competition roadmap. All features currently available on web.
+Post-competition roadmap. Core study flows are implemented on **desktop web** (`web/`); this app is a scaffold for on-the-go use.
 
-Planned: TLDR Pulse notifications, commute audio mode, quiz bursts.
+**Today:** Expo project under `mobile/` with its own `node_modules`. Start with `npm install` then `npx expo start` (or `npm run dev:mobile` from the repo root).
+
+**Planned:** TLDR Pulse push notifications, commute audio, quiz bursts, shared API client patterns with `web/`.

@@ -8,7 +8,7 @@ Apply SQL files under **`supabase/migrations/`** in timestamp order on your Supa
 |--------------|---------|
 | **`users`** | App user rows; demo user UUID aligned with env. |
 | **`uploads`** | Uploaded file metadata, status, learner prefs, optional **meme_recap**, **course_id**, transform cache columns per migrations. |
-| **`concepts`** | Per-upload concepts: title, summary, **exam_importance**, **embedding** (pgvector), **graph_data**, **has_math**, **raw_content** (per migrations). |
+| **`concepts`** | Per-upload concepts: title, summary, **exam_importance**, **embedding** (pgvector), **graph_data**, **has_math**, **`raw_content`** (optional, migration `20250330000000_concepts_raw_content.sql`) for Focus / original text flows. |
 | **`study_deck`** | One row per (user, upload): URLs + JSON for meme, audio, word bank, puzzle pairs, YouTube suggestions; **`tasks_status`** jsonb for task state + extras like **`audio_provider`**. **Realtime** enabled for live UI updates. |
 | **`courses`** | Course metadata; **uploads.course_id** optional FK. |
 | **`assessments`** | Parsed syllabus assessments; optional **course_id**. |

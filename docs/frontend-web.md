@@ -4,7 +4,8 @@
 
 ## Global shell
 
-- **`app/layout.tsx`**: wraps children with **`SiteChrome`** (sidebar, mobile tab bar, light mode toggle).
+- **`app/layout.tsx`**: wraps children with **`SiteChrome`** (sidebar, mobile tab bar). Inline script applies saved **`light-mode`** class from `localStorage` (`crambly_light_mode`) before paint to avoid a dark flash.
+- **`ChromeProvider`** (`components/layout/ChromeContext.tsx`): **`lightMode`** / **`setLightMode`**; persists toggle and syncs **`document.documentElement.classList`** (`light-mode`).
 - **Providers**: `web/app/providers.tsx` — TanStack **QueryClientProvider**.
 
 ## Notable routes
@@ -34,8 +35,12 @@ On **`/study/[uploadId]`**:
 - **Grind**: Wordle, puzzle match, quiz burst.
 - **Chill**: Same meme state as TLDR + YouTube suggestions.
 
-Meme state is shared (client recap vs pipeline **`MemeCard`**); regenerating refreshes deck data.
+Meme state is shared (client recap vs pipeline **`MemeCard`**). Regeneration uses the study actions (**Generate Meme Recap**, **New theme** / **Replace with AI meme**), not a separate overlay on the image. **`MemeCard`** (pipeline path) supports **`showHeader={false}`** when embedded under **`StudyUnifiedMemeCard`** so the section title is not duplicated.
 
-## Styling
+## Styling and themes
 
-Tailwind + CSS variables for theme tokens (`globals.css`). Game UI under `web/components/games/`.
+- **Tokens**: `web/styles/tokens.css` — `:root` defines the default **dark** palette (`--color-bg-*`, `--color-text-*`, accents, shadows). **`html.light-mode`** overrides the same variables for a **bright** UI (`color-scheme: light`).
+- **Globals**: `web/app/globals.css` imports tokens, sets `body` background/text from variables, KaTeX color, shimmer utilities.
+- **Tailwind**: utility classes often reference **`var(--color-…)`** for surfaces and borders.
+- **Light toggle**: sidebar footer (**Light** switch) and Focus reader header (☀/☾) call **`useChrome().setLightMode`**.
+- **Games**: `web/components/games/` — Wordle, PuzzleMatch, QuizBurst, YouTube suggestions, etc., use semantic variables so cards stay readable in light mode.
