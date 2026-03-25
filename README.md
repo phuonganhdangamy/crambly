@@ -4,8 +4,6 @@
 
 An AI study companion that ingests academic material on **desktop** (Next.js), transforms it into personalized formats, and supports active review in the browser — with personalization driven by a **Digital Twin**. A **native mobile app** is roadmap-only: the **`mobile/`** Expo project is a scaffold and is **not** feature-complete or part of the tested demo path.
 
-Built for the **Google Developer Group UTSC AI Case Competition 2026**.
-
 **Technical docs** for contributors: [docs/README.md](docs/README.md) (architecture, API, Supabase, agents, implementation flows, frontend notes).
 
 ---
@@ -23,12 +21,6 @@ The standard way of studying — reading hundreds of pages, memorizing textbooks
 **Not shipped for this repo:** a production **native mobile** client. The vision is still “ingestion on desktop, nudges and quick review on the phone,” but **everything you can run and test today is in the desktop app** plus the FastAPI backend.
 
 The system learns how you learn over time via a **Digital Twin** — and every output gets sharper the more you use it.
-
----
-
-## Demo Story
-
-> Amy is a UofT STEM student with ADHD and a long commute. She uploads 120 lecture slides, a syllabus, and some handwritten notes on **desktop**. Crambly detects she prefers examples over theory and shorter bursts over long reading. It transforms her material into **short study sessions** on the **study hub** (Grind games, deck audio she can play in the browser, summaries in TLDR), optional **email digest**, and deadline-aware priorities from her syllabus. When she gets stuck on torque, the system re-explains it in simpler English with a CN Tower analogy. Her **quiz results** on desktop feed the Digital Twin so the next session can prioritize torque again.
 
 ---
 
@@ -470,53 +462,4 @@ Then in `.env`: `REDIS_URL=redis://localhost:6379/0` and restart the backend.
 
 ---
 
-## MVP Scope (Submission)
-
-**Must-have:**
-- Desktop upload (PDF, slides, syllabus), personal library, and per-upload **study** view with concept graph
-- Learner mode selection
-- Gemini-powered concept extraction and transformation
-- Study hub TLDR + active formats; optional **email** daily digest (not mobile push)
-- **QuizBurst** (and related deck games) on **desktop** Grind tab
-- Digital Twin (preference storage + weak topic reprioritization)
-- Global Scholar mode (complexity dial)
-
-**Showcase / demo features:**
-- Desktop **study** page: concept graph, worked examples, formula annotations, **study deck** with games (`Wordle`, `PuzzleMatch`, `QuizBurst`, meme, audio, YouTube suggestions), **light mode**, **Email me this lesson** (TLDR)
-- **Email alerts** (`/settings/notifications`): daily digest + exam reminders (**Resend**), test send
-- **Courses** hub: group uploads, per-course study view + deck widgets
-- Study DNA (few-shot from user notes)
-- Explain Like Me
-- Meme recap generator
-- Deck **audio** / TTS in browser (commute-style listening via desktop)
-- CN Tower localized analogy example
-
-**Stretch (post-competition):**
-- **Native mobile** (Expo) with notifications and parity with web study flows
-- Attention-aware training (scroll loop detection)
-- Full gaze tracking via WebGazer.js
-- Multi-language UI
-
----
-
-## Target Audience (v1)
-
-STEM students at Canadian universities — especially those with ADHD, non-English first languages, or heavy commutes. Expanding to all disciplines post-MVP.
-
----
-
-## One-Line Pitches
-
-**Product:** Crambly transforms academic material into personalized learning on **desktop** today; mobile is the long-term companion surface.
-
-**Vision:** We're building the operating system for personalized learning — one that adapts not just to the content, but to the student's mind.
-
-**Emotional:** Not every student struggles because they work less. Many struggle because the material was never shaped for how they learn.
-
----
-
-## Submission
-
-**Deadline:** March 25, 2026 — 12:00 PM EST
-**Event:** Google Developer Group UTSC — Build With AI
-**Winners announced:** March 28, 2026 — Build With AI Closing Ceremony
+Built for the **Google Developer Group UTSC - Build With AI Case Competition 2026**.
