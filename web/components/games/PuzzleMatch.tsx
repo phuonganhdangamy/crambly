@@ -108,22 +108,22 @@ export function PuzzleMatch({ pairs }: { pairs: PuzzlePair[] }) {
   const score = matched.size;
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+    <div className="rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-lg font-semibold text-white">Puzzle match</h3>
-        <div className="flex gap-3 text-sm text-slate-400">
+        <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Puzzle match</h3>
+        <div className="flex gap-3 text-sm text-[var(--color-text-muted)]">
           <span>
-            Score: <span className="font-semibold text-indigo-200">{score}</span> / {n}
+            Score: <span className="font-semibold text-[var(--color-accent-purple)]">{score}</span> / {n}
           </span>
           <span>
-            Time: <span className="font-mono text-slate-200">{formatTime(seconds)}</span>
+            Time: <span className="font-mono text-[var(--color-text-primary)]">{formatTime(seconds)}</span>
           </span>
         </div>
       </div>
 
       <div className={`mt-6 grid gap-4 md:grid-cols-2 ${shake ? "crambly-shake" : ""}`}>
         <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Terms</p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Terms</p>
           <ul className="space-y-2">
             {termsOrder.map((t) => {
               const isMatched = matched.has(t);
@@ -136,10 +136,10 @@ export function PuzzleMatch({ pairs }: { pairs: PuzzlePair[] }) {
                     onClick={() => onTermClick(t)}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
                       isMatched
-                        ? "cursor-default border-emerald-500/60 bg-emerald-500/20 text-emerald-100"
+                        ? "cursor-default border-emerald-500/50 bg-emerald-500/10 text-[var(--color-success)]"
                         : isSel
-                          ? "border-indigo-400 bg-indigo-500/20 text-white"
-                          : "border-slate-700 bg-slate-800/80 text-slate-200 hover:border-slate-500"
+                          ? "border-[var(--color-accent-purple)] bg-[var(--color-accent-purple)]/12 text-[var(--color-text-primary)]"
+                          : "border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] hover:border-[var(--color-accent-cyan)]/35"
                     }`}
                   >
                     {t}
@@ -164,10 +164,10 @@ export function PuzzleMatch({ pairs }: { pairs: PuzzlePair[] }) {
                     onClick={() => onDefClick(d)}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
                       isMatched
-                        ? "cursor-default border-emerald-500/60 bg-emerald-500/20 text-emerald-100"
+                        ? "cursor-default border-emerald-500/50 bg-emerald-500/10 text-[var(--color-success)]"
                         : isSel
-                          ? "border-indigo-400 bg-indigo-500/20 text-white"
-                          : "border-slate-700 bg-slate-800/80 text-slate-200 hover:border-slate-500"
+                          ? "border-[var(--color-accent-purple)] bg-[var(--color-accent-purple)]/12 text-[var(--color-text-primary)]"
+                          : "border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] hover:border-[var(--color-accent-cyan)]/35"
                     }`}
                   >
                     {d}
@@ -180,13 +180,13 @@ export function PuzzleMatch({ pairs }: { pairs: PuzzlePair[] }) {
       </div>
 
       {finished && (
-        <div className="mt-6 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-center text-emerald-100">
+        <div className="mt-6 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-center text-[var(--color-success)]">
           <p className="text-lg font-semibold">Well done!</p>
-          <p className="mt-1 text-sm text-emerald-200/90">Time: {formatTime(seconds)}</p>
+          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Time: {formatTime(seconds)}</p>
           <button
             type="button"
             onClick={() => playAgain()}
-            className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+            className="mt-4 rounded-lg bg-[var(--color-success)] px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
           >
             Play again
           </button>

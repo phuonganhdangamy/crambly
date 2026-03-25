@@ -32,9 +32,9 @@ const ROWS = 6;
 function cellClass(s: LetterState): string {
   if (s === "correct") return "border-emerald-500 bg-emerald-600 text-white";
   if (s === "present") return "border-amber-500 bg-amber-600 text-white";
-  if (s === "absent") return "border-slate-600 bg-slate-700 text-slate-200";
-  if (s === "tbd") return "border-slate-500 bg-slate-800 text-white";
-  return "border-slate-700 bg-slate-900/80 text-slate-500";
+  if (s === "absent") return "border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)]";
+  if (s === "tbd") return "border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)]";
+  return "border-[var(--color-border-default)] bg-[var(--color-bg-primary)] text-[var(--color-text-muted)]";
 }
 
 type GameStatus = "playing" | "won" | "lost" | "revealed";
@@ -178,8 +178,8 @@ export function Wordle({
 
   if (playable.length === 0) {
     return (
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-slate-300">
-        <h3 className="text-lg font-semibold text-white">Wordle</h3>
+      <div className="rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6 text-[var(--color-text-secondary)]">
+        <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Wordle</h3>
         <p className="mt-2 text-sm">No five-letter terms in your word bank yet.</p>
       </div>
     );
@@ -203,7 +203,7 @@ export function Wordle({
             type="button"
             disabled={!canPlay || !target}
             onClick={() => applyHint()}
-            className="rounded-lg border border-amber-600/60 px-3 py-1 text-sm text-amber-100 hover:bg-amber-900/30 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-lg border border-[var(--color-warning)]/45 px-3 py-1 text-sm text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Hint
           </button>
@@ -218,7 +218,7 @@ export function Wordle({
           <button
             type="button"
             onClick={() => pickWord({ excludeCurrent: playable.length > 1 })}
-            className="rounded-lg border border-cyan-600/50 px-3 py-1 text-sm text-cyan-100 hover:bg-cyan-950/40"
+            className="rounded-lg border border-[var(--color-accent-cyan)]/45 px-3 py-1 text-sm text-[var(--color-accent-cyan)] hover:bg-[var(--color-accent-cyan)]/10"
           >
             Skip to next word
           </button>
@@ -227,11 +227,11 @@ export function Wordle({
       <p className="mt-1 text-xs text-slate-500">Six guesses · your lecture&apos;s vocabulary</p>
 
       {hintOpen && target && (
-        <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-950/40 p-3 text-sm text-amber-100/95">
-          <p className="font-medium text-amber-200">Hint</p>
-          <p className="mt-1 text-amber-100/90">{definitionFor(target)}</p>
+        <div className="mt-4 rounded-lg border border-[var(--color-warning)]/35 bg-[var(--color-warning)]/8 p-3 text-sm text-[var(--color-text-primary)]">
+          <p className="font-medium text-[var(--color-warning)]">Hint</p>
+          <p className="mt-1 text-[var(--color-text-secondary)]">{definitionFor(target)}</p>
           {firstLetterRevealed && (
-            <p className="mt-2 text-xs text-amber-200/80">First letter: {target[0]?.toUpperCase() ?? "—"}</p>
+            <p className="mt-2 text-xs text-[var(--color-text-muted)]">First letter: {target[0]?.toUpperCase() ?? "—"}</p>
           )}
         </div>
       )}
@@ -265,24 +265,24 @@ export function Wordle({
 
       {status === "won" && (
         <div
-          className={`mt-6 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-emerald-100 ${
+          className={`mt-6 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-[var(--color-success)] ${
             celebrate ? "animate-pulse" : ""
           }`}
         >
           <p className="text-lg font-semibold">You got it! 🎉</p>
-          <p className="mt-2 text-sm text-emerald-200/90">{definitionFor(target)}</p>
+          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{definitionFor(target)}</p>
         </div>
       )}
       {status === "lost" && (
-        <div className="mt-6 rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-rose-100">
+        <div className="mt-6 rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-[var(--color-danger)]">
           <p className="font-semibold">The word was {target.toUpperCase()}</p>
-          <p className="mt-2 text-sm text-rose-200/90">{definitionFor(target)}</p>
+          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{definitionFor(target)}</p>
         </div>
       )}
       {status === "revealed" && (
-        <div className="mt-6 rounded-xl border border-slate-500/40 bg-slate-800/50 p-4 text-slate-100">
-          <p className="font-semibold text-slate-200">Answer revealed: {target.toUpperCase()}</p>
-          <p className="mt-2 text-sm text-slate-300">{definitionFor(target)}</p>
+        <div className="mt-6 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] p-4 text-[var(--color-text-primary)]">
+          <p className="font-semibold">Answer revealed: {target.toUpperCase()}</p>
+          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{definitionFor(target)}</p>
         </div>
       )}
 
@@ -310,7 +310,7 @@ export function Wordle({
           ))}
           <button
             type="button"
-            className="rounded bg-slate-700 px-2 py-2 text-xs font-semibold text-white"
+            className="rounded bg-[var(--color-bg-tertiary)] px-2 py-2 text-xs font-semibold text-[var(--color-text-primary)] ring-1 ring-[var(--color-border-default)]"
             onClick={() => canPlay && setCurrent((c) => c.slice(0, -1))}
           >
             ⌫
@@ -326,7 +326,7 @@ function KeyCap({ k, onPress }: { k: string; onPress: () => void }) {
     <button
       type="button"
       onClick={onPress}
-      className="min-w-[2rem] rounded bg-slate-700 px-2 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+      className="min-w-[2rem] rounded bg-[var(--color-bg-tertiary)] px-2 py-2 text-sm font-semibold text-[var(--color-text-primary)] ring-1 ring-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)]"
     >
       {k.toUpperCase()}
     </button>

@@ -40,6 +40,7 @@ import {
   parseStoredMemeRecap,
   postAudioClipMeta,
   postDeckGenerate,
+  postEmailLessonExport,
   postMeme,
   postTts,
   probeTransformCache,
@@ -125,7 +126,6 @@ function PracticeSectionCard({
 
 /** Same meme in TLDR + Chill: prefer newest client recap, else pipeline MemeCard. */
 function StudyUnifiedMemeCard({
-  uploadId,
   deck,
   ts,
   meme,
@@ -134,10 +134,8 @@ function StudyUnifiedMemeCard({
   memeTone,
   busyMeme,
   onMeme,
-  invalidateDeck,
   variant,
 }: {
-  uploadId: string;
   deck: StudyDeckRow;
   ts: StudyDeckTasksStatus | null | undefined;
   meme: MemePipelineResponse | null;
@@ -146,7 +144,6 @@ function StudyUnifiedMemeCard({
   memeTone: string;
   busyMeme: boolean;
   onMeme: (reimagine: boolean) => void;
-  invalidateDeck: () => void;
   variant: "tldr" | "chill";
 }) {
   const pending = taskPending(ts, "meme");
@@ -208,11 +205,10 @@ function StudyUnifiedMemeCard({
         ) : deck.meme_image_url ? (
           <div className="mt-4">
             <MemeCard
-              uploadId={uploadId}
+              showHeader={false}
               imageUrl={deck.meme_image_url}
               title={memeTitle}
               tone={memeTone}
-              onUpdated={() => invalidateDeck()}
             />
             <div className="mt-4 flex flex-wrap gap-2">
               {variant === "tldr" ? (
@@ -282,6 +278,8 @@ export default function StudyPage() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [meme, setMeme] = useState<MemePipelineResponse | null>(null);
   const [busyAudio, setBusyAudio] = useState(false);
+  const [busyLessonEmail, setBusyLessonEmail] = useState(false);
+  const [lessonEmailMsg, setLessonEmailMsg] = useState<string | null>(null);
   const [busyMeme, setBusyMeme] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
@@ -581,6 +579,29 @@ export default function StudyPage() {
     }
   }
 
+  async function onEmailLessonExport() {
+    if (!uploadId) return;
+    setBusyLessonEmail(true);
+    setLessonEmailMsg(null);
+    try {
+      const r = await postEmailLessonExport(uploadId, {
+        learner_mode: mode,
+        complexity_dial: dial ?? null,
+      });
+      setLessonEmailMsg(
+        r.audio_attached
+          ? `Lesson emailed to ${r.to} (audio attached).`
+          : `Lesson emailed to ${r.to}. If audio is ready, check the message—large files may be linked instead of attached.`,
+      );
+      window.setTimeout(() => setLessonEmailMsg(null), 6000);
+    } catch (e) {
+      setLessonEmailMsg(e instanceof Error ? e.message : "Could not send lesson email");
+      window.setTimeout(() => setLessonEmailMsg(null), 8000);
+    } finally {
+      setBusyLessonEmail(false);
+    }
+  }
+
   async function onMeme(reimagine: boolean) {
     setBusyMeme(true);
     try {
@@ -667,7 +688,7 @@ export default function StudyPage() {
             {uploadRow?.file_name ?? "Study deck"}
           </h1>
           <p className="text-sm text-[var(--color-text-secondary)]">
-            TLDR · Grind · Chill — overview, drills, and unwind. Meme stays in sync between TLDR and Chill.
+            TLDR · Grind · Chill — overview, drills, and unwind.
           </p>
         </div>
       </header>
@@ -775,7 +796,29 @@ export default function StudyPage() {
                     <Button type="button" variant="primary" disabled={busyAudio} loading={busyAudio} onClick={() => void onAudio()}>
                       Generate Audio
                     </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={busyLessonEmail}
+                      loading={busyLessonEmail}
+                      onClick={() => void onEmailLessonExport()}
+                    >
+                      Email me this lesson
+                    </Button>
                   </div>
+                  <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                    Sends an HTML export for your current mode/dial (from cache when available), concept list, transcript, and deck
+                    audio when possible. Recipient:{" "}
+                    <a href="/settings/notifications" className="text-[var(--color-accent-cyan)] hover:underline">
+                      Email alerts
+                    </a>{" "}
+                    address or demo inbox—requires <code className="text-[10px]">RESEND_API_KEY</code>.
+                  </p>
+                  {lessonEmailMsg && (
+                    <p className="mt-2 text-sm text-[var(--color-text-secondary)]" role="status">
+                      {lessonEmailMsg}
+                    </p>
+                  )}
                   {audioUrl && (
                     <audio className="mt-4 w-full" controls src={audioUrl}>
                       <track kind="captions" />
@@ -798,7 +841,11 @@ export default function StudyPage() {
                           <p className="mt-4 text-sm text-[var(--color-danger)]">Audio task failed (check ElevenLabs key).</p>
                         ) : deck.audio_url && deck.audio_transcript ? (
                           <div className="mt-4">
-                            <AudioPlayer audioUrl={deck.audio_url} transcript={deck.audio_transcript} />
+                            <AudioPlayer
+                              audioUrl={deck.audio_url}
+                              transcript={deck.audio_transcript}
+                              audioProvider={deck.tasks_status?.audio_provider ?? null}
+                            />
                           </div>
                         ) : (
                           <p className="mt-4 text-sm text-[var(--color-text-muted)]">No deck audio yet.</p>
@@ -837,7 +884,6 @@ export default function StudyPage() {
                 {deck ? (
                   <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.1 }}>
                     <StudyUnifiedMemeCard
-                      uploadId={uploadId!}
                       deck={deck}
                       ts={ts}
                       meme={meme}
@@ -846,7 +892,6 @@ export default function StudyPage() {
                       memeTone={memeTone}
                       busyMeme={busyMeme}
                       onMeme={(r) => void onMeme(r)}
-                      invalidateDeck={invalidateDeck}
                       variant="tldr"
                     />
                   </motion.div>
@@ -976,7 +1021,6 @@ export default function StudyPage() {
               <>
                 <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0 }}>
                   <StudyUnifiedMemeCard
-                    uploadId={uploadId!}
                     deck={deck}
                     ts={ts}
                     meme={meme}
@@ -985,7 +1029,6 @@ export default function StudyPage() {
                     memeTone={memeTone}
                     busyMeme={busyMeme}
                     onMeme={(r) => void onMeme(r)}
-                    invalidateDeck={invalidateDeck}
                     variant="chill"
                   />
                 </motion.div>

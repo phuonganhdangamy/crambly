@@ -104,7 +104,7 @@ export default function FocusReaderPage() {
   const { sessionGoal, smartNudgesEnabled, toggleSmartNudges, sectionsReviewed, simplificationsUsed, endSession } =
     useFocusStore();
 
-  const { calming, setCalming } = useChrome();
+  const { lightMode, setLightMode } = useChrome();
 
   const pagesQ = useQuery({
     queryKey: ["uploadPages", uploadId],
@@ -445,12 +445,12 @@ export default function FocusReaderPage() {
           </button>
           <button
             type="button"
-            aria-label="Calming mode"
-            onClick={() => setCalming(!calming)}
+            aria-label="Light mode"
+            onClick={() => setLightMode(!lightMode)}
             className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border-default)] text-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-            title="Calming mode"
+            title="Light mode — bright background"
           >
-            ☾
+            {lightMode ? "☀" : "☾"}
           </button>
         </div>
       </header>

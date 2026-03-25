@@ -112,14 +112,29 @@ function IconUsers({ className }: { className?: string }) {
   );
 }
 
-function IconMoon({ className }: { className?: string }) {
+function IconBell({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0h6z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconSun({ className }: { className?: string }) {
   return (
     <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.75" />
       <path
-        d="M21 14.5A8.5 8.5 0 019.5 3 8.5 8.5 0 0012 21a8.5 8.5 0 009-6.5z"
+        d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
         stroke="currentColor"
         strokeWidth="1.75"
-        strokeLinejoin="round"
+        strokeLinecap="round"
       />
     </svg>
   );
@@ -133,11 +148,12 @@ const NAV = [
   { href: "/mode", label: "Study DNA", Icon: IconBrain },
   { href: "/upload", label: "Expressive Media", Icon: IconSparkles },
   { href: "/focus", label: "Focus Mode", Icon: IconEye },
+  { href: "/settings/notifications", label: "Email alerts", Icon: IconBell },
 ] as const;
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { calming, setCalming, sidebarCollapsed, setSidebarCollapsed, hydrated } = useChrome();
+  const { lightMode, setLightMode, sidebarCollapsed, setSidebarCollapsed, hydrated } = useChrome();
   const reduceMotion = useReducedMotion();
   const expanded = !sidebarCollapsed;
   const [staggerGate, setStaggerGate] = useState(false);
@@ -231,23 +247,23 @@ export function Sidebar() {
         <div className={`flex items-center gap-2 ${expanded ? "justify-between" : "flex-col"}`}>
           {expanded && (
             <span className="flex min-w-0 items-center gap-2 text-[var(--color-text-secondary)]">
-              <IconMoon className="shrink-0" />
-              <span className="truncate text-xs font-medium">Calm</span>
+              <IconSun className="shrink-0" />
+              <span className="truncate text-xs font-medium">Light</span>
             </span>
           )}
           <button
             type="button"
             role="switch"
-            aria-checked={calming}
-            aria-label="Calming mode"
-            onClick={() => setCalming(!calming)}
-            title="Calming mode"
-            className={`relative h-7 w-12 shrink-0 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] ${calming ? "border-[var(--color-accent-cyan)]/45" : ""}`}
+            aria-checked={lightMode}
+            aria-label="Light mode"
+            onClick={() => setLightMode(!lightMode)}
+            title="Light mode — bright background"
+            className={`relative h-7 w-12 shrink-0 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] ${lightMode ? "border-[var(--color-accent-cyan)]/45" : ""}`}
           >
             <motion.span
               className="absolute top-1 h-5 w-5 rounded-full bg-[var(--color-accent-cyan)] shadow-[var(--shadow-neon-cyan)]"
               initial={false}
-              animate={{ left: calming ? 22 : 4 }}
+              animate={{ left: lightMode ? 22 : 4 }}
               transition={{ type: "spring", stiffness: 500, damping: 34 }}
             />
           </button>

@@ -32,7 +32,8 @@ from api.routes import api_router
 from config import Settings, get_settings
 from db import ensure_demo_user, supabase_client
 from tasks.common import storage_signed_url
-from elevenlabs_client import synthesize_speech
+from scheduler import start_notification_scheduler
+from tts_synthesis import synthesize_study_audio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -110,6 +111,10 @@ def _startup() -> None:
         ensure_demo_user()
     except Exception as e:  # noqa: BLE001
         logger.warning("Demo user bootstrap skipped: %s", e)
+    try:
+        start_notification_scheduler()
+    except Exception:  # noqa: BLE001
+        logger.warning("Notification scheduler not started (missing deps or DB tables?)", exc_info=True)
 
 
 @app.get("/health")
@@ -620,13 +625,17 @@ def api_preferences(
 @app.post("/api/tts")
 def api_tts(body: TtsBody, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     _ = settings
-    try:
-        audio = synthesize_speech(body.text)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(500, str(e)) from e
     import base64
 
-    return {"audio_base64": base64.b64encode(audio).decode("ascii"), "mime": "audio/mpeg"}
+    try:
+        audio, mime, provider = synthesize_study_audio(body.text, max_chars=2500)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, str(e)) from e
+    return {
+        "audio_base64": base64.b64encode(audio).decode("ascii"),
+        "mime": mime,
+        "provider": provider,
+    }
 
 
 @app.post("/api/meme")

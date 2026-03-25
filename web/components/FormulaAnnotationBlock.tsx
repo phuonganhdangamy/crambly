@@ -15,6 +15,7 @@ export function FormulaAnnotationBlock({
   terms: FormulaTerm[];
 }) {
   const [active, setActive] = useState<string | null>(null);
+  const [showLaTeXSource, setShowLaTeXSource] = useState(false);
 
   const katexFormula = useMemo(() => {
     const inner = stripOuterLatexDelimiters(formula);
@@ -58,23 +59,34 @@ export function FormulaAnnotationBlock({
       </div>
       {terms.length > 0 && annotatedParts.length > 0 && (
         <div className="mt-3">
-          <p className="text-xs text-slate-500">Hover legend rows to highlight symbols in the LaTeX source.</p>
-          <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-900/90 p-3 font-mono text-sm leading-relaxed text-cyan-50">
-            {annotatedParts.map((p, i) =>
-              p.sym ? (
-                <span
-                  key={i}
-                  className={`rounded px-0.5 transition-colors ${
-                    active === p.sym ? "bg-cyan-500/50 text-white" : "text-cyan-200"
-                  }`}
-                >
-                  {p.text}
-                </span>
-              ) : (
-                <span key={i}>{p.text}</span>
-              ),
-            )}
-          </pre>
+          <button
+            type="button"
+            onClick={() => setShowLaTeXSource((v) => !v)}
+            className="text-xs font-medium text-cyan-400/90 hover:text-cyan-300 hover:underline"
+          >
+            {showLaTeXSource ? "Hide LaTeX source" : "Show LaTeX source"}
+          </button>
+          {showLaTeXSource && (
+            <>
+              <p className="mt-2 text-xs text-slate-500">Hover legend rows to highlight symbols in the source.</p>
+              <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-900/90 p-3 font-mono text-sm leading-relaxed text-cyan-50">
+                {annotatedParts.map((p, i) =>
+                  p.sym ? (
+                    <span
+                      key={i}
+                      className={`rounded px-0.5 transition-colors ${
+                        active === p.sym ? "bg-cyan-500/50 text-white" : "text-cyan-200"
+                      }`}
+                    >
+                      {p.text}
+                    </span>
+                  ) : (
+                    <span key={i}>{p.text}</span>
+                  ),
+                )}
+              </pre>
+            </>
+          )}
         </div>
       )}
       {terms.length > 0 && (

@@ -6,7 +6,10 @@ redis==5.2.1
 httpx==0.28.1
 # Newer Gemini 3.x models may need a recent SDK; upgrade if you see model-not-found errors.
 google-generativeai>=0.8.4
+google-genai>=0.8.0
 pydantic==2.10.4
 pydantic-settings==2.7.0
 python-dotenv==1.0.1
 PyMuPDF>=1.24.0
+resend>=0.7.0
+APScheduler>=3.10.0

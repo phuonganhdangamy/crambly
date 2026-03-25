@@ -13,7 +13,7 @@ export function QuizBurst({ questions }: { questions: QuizQuestion[] }) {
   const q = questions[idx];
   if (!q) {
     return (
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-slate-400">
+      <div className="rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6 text-[var(--color-text-secondary)]">
         No quiz questions for this deck yet.
       </div>
     );
@@ -43,23 +43,29 @@ export function QuizBurst({ questions }: { questions: QuizQuestion[] }) {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+    <div className="rounded-2xl border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-lg font-semibold text-white">Quiz burst</h3>
-        <span className="text-sm text-slate-400">
+        <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Quiz burst</h3>
+        <span className="text-sm text-[var(--color-text-muted)]">
           {idx + 1} / {questions.length} · Score {score}
         </span>
       </div>
-      <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">{q.topic}</p>
-      <p className="mt-3 text-slate-100">{q.question}</p>
+      <p className="mt-1 text-xs uppercase tracking-wide text-[var(--color-text-muted)]">{q.topic}</p>
+      <p className="mt-3 text-[var(--color-text-primary)]">{q.question}</p>
       <ul className="mt-4 space-y-2">
         {q.choices.map((c, i) => {
           let cls =
-            "w-full rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-3 text-left text-sm text-slate-200 hover:border-slate-500";
+            "w-full rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] px-4 py-3 text-left text-sm text-[var(--color-text-primary)] hover:border-[var(--color-accent-cyan)]/40";
           if (revealed) {
-            if (i === q.correct_index) cls = "w-full rounded-xl border border-emerald-500/60 bg-emerald-500/20 px-4 py-3 text-left text-sm text-emerald-100";
-            else if (i === picked) cls = "w-full rounded-xl border border-rose-500/60 bg-rose-500/20 px-4 py-3 text-left text-sm text-rose-100";
-            else cls = "w-full rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 text-left text-sm text-slate-500";
+            if (i === q.correct_index)
+              cls =
+                "w-full rounded-xl border border-emerald-500/50 bg-emerald-500/10 px-4 py-3 text-left text-sm text-[var(--color-success)]";
+            else if (i === picked)
+              cls =
+                "w-full rounded-xl border border-rose-500/50 bg-rose-500/10 px-4 py-3 text-left text-sm text-[var(--color-danger)]";
+            else
+              cls =
+                "w-full rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-4 py-3 text-left text-sm text-[var(--color-text-muted)]";
           }
           return (
             <li key={i}>
@@ -74,7 +80,7 @@ export function QuizBurst({ questions }: { questions: QuizQuestion[] }) {
         <button
           type="button"
           onClick={() => next()}
-          className="mt-4 rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
+          className="mt-4 rounded-lg bg-[var(--color-accent-purple)] px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
         >
           {idx + 1 >= questions.length ? "Start over" : "Next"}
         </button>

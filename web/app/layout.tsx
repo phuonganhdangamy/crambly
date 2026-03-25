@@ -21,7 +21,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{if(localStorage.getItem('crambly_light_mode')==='1')document.documentElement.classList.add('light-mode')}catch(e){}",
+          }}
+        />
+      </head>
       <body className="antialiased">
         <Providers>
           <SiteChrome>{children}</SiteChrome>

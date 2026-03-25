@@ -92,11 +92,6 @@ pre {
   animation: crambly-shimmer 1.2s ease-in-out infinite;
 }
 
-html.calming-mode .crambly-shimmer-block {
-  animation: none;
-  background: var(--color-bg-tertiary);
-}
-
 @keyframes crambly-building-pulse {
   0%,
   100% {
@@ -107,7 +102,7 @@ html.calming-mode .crambly-shimmer-block {
   }
 }
 
-html:not(.calming-mode) .crambly-building-pulse {
+.crambly-building-pulse {
   animation: crambly-building-pulse 2.8s ease-in-out infinite;
 }
 

@@ -23,26 +23,30 @@ ALLOWED_TEMPLATES = frozenset(
         "distracted_boyfriend",
         "among_us_emergency",
         "this_is_fine",
-        "galaxy_brain",
+        "change_my_mind",
+        "is_this_a_pigeon",
         "custom",
     }
 )
 
 # Imgflip template_id strings (api.imgflip.com/caption_image).
+# Only two-caption templates: caption_image maps text0/text1 and does not fill multi-panel layouts.
 IMGFLIP_TEMPLATE_IDS: dict[str, str] = {
     "drake": "181913649",
     "distracted_boyfriend": "129242436",
     "among_us_emergency": "268378464",
     "this_is_fine": "55365341",
-    "galaxy_brain": "93895088",
+    "change_my_mind": "149430545",
+    "is_this_a_pigeon": "100777631",
 }
 
 MEME_BRIEF_PROMPT = """You are helping students remember material with a single study-related meme.
 
 Return JSON only (no markdown fences) with exactly these keys:
-- "template": one of "drake", "distracted_boyfriend", "among_us_emergency", "this_is_fine", "galaxy_brain"
-- "top_text": short string for the top of the meme (student-safe, no slurs)
-- "bottom_text": short string for the bottom (can be empty string if the template uses one panel)
+- "template": one of "drake", "distracted_boyfriend", "among_us_emergency", "this_is_fine", "change_my_mind", "is_this_a_pigeon", "custom"
+  Pick the template that best fits the joke (vary your choice across memes). Every option except "custom" uses exactly two text boxes via Imgflip.
+- "top_text": short string for the first caption (student-safe, no slurs)
+- "bottom_text": short string for the second caption (both should carry the punchline when the format needs two lines)
 - "fallback_prompt": a single string: "A highly detailed meme-style illustration of [scene description] with bold impact font text saying [text]"
   where [scene description] matches the meme idea and [text] summarizes the joke (include top/bottom wording if relevant).
 
@@ -107,6 +111,10 @@ def _coerce_brief(
     if not isinstance(raw, dict):
         raise ValueError("meme brief is not a JSON object")
     template = str(raw.get("template") or "custom").strip().lower().replace(" ", "_")
+    # Legacy: galaxy_brain has four panels but Imgflip only fills two boxes.
+    if template == "galaxy_brain":
+        alts = list(IMGFLIP_TEMPLATE_IDS.keys())
+        template = random.choice(alts) if alts else "custom"
     if template not in ALLOWED_TEMPLATES:
         template = "custom"
     ft = (forbid_template or "").strip().lower().replace(" ", "_")

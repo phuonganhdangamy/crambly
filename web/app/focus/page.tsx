@@ -95,7 +95,7 @@ export default function FocusPage() {
       className="flex min-h-[calc(100vh-2rem)] flex-col items-center justify-center px-4 py-12"
     >
       <div className="w-full max-w-[640px]">
-        <h1 className="text-center text-3xl font-bold text-white md:text-4xl">Enter Focus Mode</h1>
+        <h1 className="text-center text-3xl font-bold text-[var(--color-text-primary)] md:text-4xl">Enter Focus Mode</h1>
         <p className="mt-3 text-center text-[var(--color-text-secondary)]">
           Read your original lecture content. Crambly watches where you slow down and helps without interrupting.
         </p>

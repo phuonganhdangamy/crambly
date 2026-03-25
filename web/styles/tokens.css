@@ -1,4 +1,6 @@
 :root {
+  color-scheme: dark;
+
   /* Base surfaces */
   --color-bg-primary: #0d1117; /* deep navy — main background */
   --color-bg-secondary: #161b22; /* slightly lighter — cards */
@@ -49,18 +51,34 @@
   --transition-slow: 400ms ease;
 }
 
-/* Calming Mode — applied to <html> when toggle is active */
-html.calming-mode {
-  --color-accent-cyan: #5b8db8;
-  --color-accent-lime: #5a8a60;
-  --color-accent-orange: #a0714f;
-  --color-accent-purple: #7b6ba8;
-  --color-accent-pink: #a07890;
-  --shadow-neon-cyan: none;
-  --shadow-neon-lime: none;
-}
+/* Light mode — bright surfaces and readable text (toggle in sidebar / focus header) */
+html.light-mode {
+  color-scheme: light;
 
-html.calming-mode * {
-  animation-duration: 0ms !important;
-  transition-duration: 100ms !important;
+  --color-bg-primary: #f6f8fa;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #eaeef2;
+  --color-bg-elevated: #ffffff;
+
+  --color-accent-cyan: #0969da;
+  --color-accent-lime: #1a7f37;
+  --color-accent-orange: #bc4c00;
+  --color-accent-purple: #8250df;
+  --color-accent-pink: #bf3989;
+
+  --color-text-primary: #1f2328;
+  --color-text-secondary: #57606a;
+  --color-text-muted: #8c959f;
+
+  --color-border-default: #d0d7de;
+  --color-border-active: #0969da40;
+
+  --color-success: #1a7f37;
+  --color-warning: #bc4c00;
+  --color-danger: #cf222e;
+  --color-info: #0969da;
+
+  --shadow-neon-cyan: 0 0 0 1px #0969da22;
+  --shadow-neon-lime: 0 0 0 1px #1a7f3722;
+  --shadow-card: 0 1px 3px rgba(31, 35, 40, 0.12);
 }

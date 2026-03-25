@@ -2,12 +2,12 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 
-const LS_CALM = "crambly_calming_mode";
+const LS_LIGHT = "crambly_light_mode";
 const LS_SIDEBAR = "crambly_sidebar_collapsed";
 
 type Ctx = {
-  calming: boolean;
-  setCalming: (v: boolean) => void;
+  lightMode: boolean;
+  setLightMode: (v: boolean) => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (v: boolean) => void;
   hydrated: boolean;
@@ -16,21 +16,21 @@ type Ctx = {
 const ChromeCtx = createContext<Ctx | null>(null);
 
 export function ChromeProvider({ children }: { children: React.ReactNode }) {
-  const [calming, setCalming] = useState(false);
+  const [lightMode, setLightMode] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setCalming(localStorage.getItem(LS_CALM) === "1");
+    setLightMode(localStorage.getItem(LS_LIGHT) === "1");
     setSidebarCollapsed(localStorage.getItem(LS_SIDEBAR) === "1");
     setHydrated(true);
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    document.documentElement.classList.toggle("calming-mode", calming);
-    localStorage.setItem(LS_CALM, calming ? "1" : "0");
-  }, [calming, hydrated]);
+    document.documentElement.classList.toggle("light-mode", lightMode);
+    localStorage.setItem(LS_LIGHT, lightMode ? "1" : "0");
+  }, [lightMode, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -38,7 +38,7 @@ export function ChromeProvider({ children }: { children: React.ReactNode }) {
   }, [sidebarCollapsed, hydrated]);
 
   return (
-    <ChromeCtx.Provider value={{ calming, setCalming, sidebarCollapsed, setSidebarCollapsed, hydrated }}>
+    <ChromeCtx.Provider value={{ lightMode, setLightMode, sidebarCollapsed, setSidebarCollapsed, hydrated }}>
       {children}
     </ChromeCtx.Provider>
   );

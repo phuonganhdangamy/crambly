@@ -349,6 +349,8 @@ REDIS_URL=
    - `supabase/migrations/20250327000000_uploads_study_transform_cache.sql` (cached study transform JSON)
    - `supabase/migrations/20250328000000_study_deck.sql` (**`study_deck`** table + Realtime — required for desktop games / deck pipeline)
    - `supabase/migrations/20250329000000_courses.sql` (**`courses`** and upload ↔ course association)
+   - `supabase/migrations/20250331000000_upload_pages.sql` (optional page thumbnails / per-page metadata)
+   - `supabase/migrations/20250332000000_notification_preferences.sql` (**`notification_preferences`** + **`notification_log`** — email digests / exam reminders)
 2. **Storage →** confirm bucket **`uploads`** exists (or match `SUPABASE_UPLOAD_BUCKET` in `.env`).
 
 ### 4. Backend (FastAPI)

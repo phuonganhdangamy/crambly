@@ -9,6 +9,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from agents.delivery_agent import build_quiz_burst_for_upload
+from agents.notification_agent import send_daily_digest
+from lesson_export import send_lesson_export_email
 from agents.expressive_media_agent import run_meme_pipeline
 from config import Settings, get_settings
 from db import ensure_demo_user, supabase_client
@@ -443,4 +445,147 @@ def post_meme_regenerate(
     except Exception as e:  # noqa: BLE001
         logger.exception("meme regenerate failed")
         patch_study_deck(uid, task_updates={"meme": "error"})
+        raise HTTPException(500, str(e)) from e
+
+
+class NotificationPrefsBody(BaseModel):
+    email: str | None = None
+    daily_digest_enabled: bool | None = None
+    daily_digest_time: str | None = None
+    exam_reminder_enabled: bool | None = None
+    exam_reminder_days_before: int | None = Field(default=None, ge=1, le=14)
+    timezone: str | None = None
+
+
+@api_router.get("/notifications/preferences")
+def get_notification_preferences(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    user_id = str(settings.crambly_demo_user_id)
+    ensure_demo_user()
+    sb = supabase_client()
+    try:
+        res = (
+            sb.table("notification_preferences")
+            .select("*")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("notification_preferences read failed")
+        raise HTTPException(503, "notification_preferences unavailable — apply latest Supabase migrations") from e
+    if not res.data:
+        return {
+            "user_id": user_id,
+            "email": settings.crambly_demo_user_email,
+            "daily_digest_enabled": True,
+            "daily_digest_time": "08:00",
+            "exam_reminder_enabled": True,
+            "exam_reminder_days_before": 3,
+            "timezone": "America/Toronto",
+            "persisted": False,
+        }
+    row = dict(res.data[0])
+    row["persisted"] = True
+    return row
+
+
+@api_router.post("/notifications/preferences")
+def post_notification_preferences(
+    body: NotificationPrefsBody,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    user_id = str(settings.crambly_demo_user_id)
+    ensure_demo_user()
+    sb = supabase_client()
+    patch = {k: v for k, v in body.model_dump(exclude_none=True).items()}
+    if not patch:
+        raise HTTPException(400, "No fields to update")
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    if "email" not in patch or not (patch.get("email") or "").strip():
+        patch["email"] = settings.crambly_demo_user_email
+    existing = (
+        sb.table("notification_preferences").select("id").eq("user_id", user_id).limit(1).execute()
+    )
+    try:
+        if existing.data:
+            sb.table("notification_preferences").update(patch).eq("user_id", user_id).execute()
+        else:
+            row: dict[str, Any] = {
+                "user_id": user_id,
+                "email": settings.crambly_demo_user_email,
+                "daily_digest_enabled": True,
+                "daily_digest_time": "08:00",
+                "exam_reminder_enabled": True,
+                "exam_reminder_days_before": 3,
+                "timezone": "America/Toronto",
+            }
+            row.update(patch)
+            sb.table("notification_preferences").insert(row).execute()
+    except Exception as e:  # noqa: BLE001
+        logger.exception("notification_preferences write failed")
+        raise HTTPException(500, str(e)) from e
+    return {"ok": True}
+
+
+@api_router.post("/notifications/test-digest")
+def post_notification_test_digest(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    user_id = str(settings.crambly_demo_user_id)
+    ensure_demo_user()
+    sb = supabase_client()
+    try:
+        res = (
+            sb.table("notification_preferences")
+            .select("email")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, "notification_preferences unavailable — apply migrations") from e
+    email = (
+        (res.data[0].get("email") if res.data else None) or settings.crambly_demo_user_email
+    ).strip()
+    try:
+        send_daily_digest(user_id, email, force=True)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("test digest failed")
+        raise HTTPException(500, str(e)) from e
+    return {"ok": True, "message": "Email sent (if Resend accepted it)"}
+
+
+class EmailLessonBody(BaseModel):
+    """Export lesson HTML + deck audio to email. Recipient defaults from notification prefs or demo email."""
+
+    email: str | None = None
+    learner_mode: str = "adhd"
+    complexity_dial: float | None = None
+
+
+@api_router.post("/uploads/{upload_id}/email-lesson")
+def post_upload_email_lesson(
+    upload_id: str,
+    body: EmailLessonBody,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    user_id = str(settings.crambly_demo_user_id)
+    ensure_demo_user()
+    uid = upload_id.strip()
+    if not uid:
+        raise HTTPException(400, "upload_id required")
+    allowed = {"adhd", "visual", "global_scholar", "audio", "exam_cram"}
+    mode = body.learner_mode if body.learner_mode in allowed else "adhd"
+    try:
+        return send_lesson_export_email(
+            user_id=user_id,
+            upload_id=uid,
+            to_email=body.email,
+            learner_mode=mode,
+            complexity_dial=body.complexity_dial,
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(503, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("email lesson export failed")
         raise HTTPException(500, str(e)) from e

@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
     youtube_api_key: str = ""
+    # Resend (transactional email). https://resend.com — set RESEND_API_KEY; use a verified domain for `from`.
+    resend_api_key: str = ""
+    resend_from_email: str = "Crambly <onboarding@resend.dev>"
+    # Base URL for links inside notification emails (study hub, courses).
+    crambly_public_web_url: str = "http://localhost:3000"
+    # Gemini TTS fallback when ElevenLabs fails (low quota — use as fallback only).
+    gemini_tts_model: str = "gemini-2.5-flash-preview-tts"
     # Empty = skip Redis (demo-friendly). Set e.g. redis://localhost:6379/0 when you run a worker queue.
     redis_url: str = ""
 

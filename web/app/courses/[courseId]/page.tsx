@@ -404,11 +404,9 @@ export default function CourseHubPage() {
                 ) : deck?.meme_image_url ? (
                   <Card hoverable glow>
                     <MemeCard
-                      uploadId={selectedId}
                       imageUrl={deck.meme_image_url}
                       title={memeMeta?.brief?.top_text || uploads.find((u) => u.id === selectedId)?.file_name || "Recap"}
                       tone={memeMeta?.brief?.template || "Deck"}
-                      onUpdated={() => invalidateDeck()}
                     />
                   </Card>
                 ) : (
@@ -423,7 +421,11 @@ export default function CourseHubPage() {
                     <p className="text-[var(--color-danger)]">Audio unavailable.</p>
                   ) : deck?.audio_url && deck.audio_transcript ? (
                     <Card hoverable glow>
-                      <AudioPlayer audioUrl={deck.audio_url} transcript={deck.audio_transcript} />
+                      <AudioPlayer
+                        audioUrl={deck.audio_url}
+                        transcript={deck.audio_transcript}
+                        audioProvider={deck.tasks_status?.audio_provider ?? null}
+                      />
                     </Card>
                   ) : (
                     <p className="text-[var(--color-text-secondary)]">No audio summary for this lecture.</p>
