@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     # Empty = skip Redis (demo-friendly). Set e.g. redis://localhost:6379/0 when you run a worker queue.
     redis_url: str = ""
 
+    # Browser CORS: comma-separated origins, e.g. https://app.example.com,https://www.example.com
+    # Use * for local dev only; production should list explicit HTTPS origins.
+    cors_origins: str = "*"
+    # Ignored when cors_origins is * (browsers disallow credentials with wildcard).
+    cors_allow_credentials: bool = False
+
+    # In-process digest/reminder scheduler. Set false on extra API replicas to avoid duplicate sends.
+    enable_notification_scheduler: bool = True
+
     crambly_demo_user_id: UUID = UUID("00000000-0000-0000-0000-000000000001")
     crambly_demo_user_email: str = "demo@crambly.app"
 

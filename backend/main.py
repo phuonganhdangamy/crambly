@@ -42,13 +42,27 @@ app = FastAPI(title="Crambly API", version="0.1.0")
 
 app.include_router(api_router, prefix="/api")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+def _cors_middleware_kwargs() -> dict[str, Any]:
+    s = get_settings()
+    raw = (s.cors_origins or "*").strip()
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    origins = parts if parts else ["*"]
+    wildcard = len(origins) == 1 and origins[0] == "*"
+    allow_credentials = bool(s.cors_allow_credentials) and not wildcard
+    if s.cors_allow_credentials and wildcard:
+        logger.warning(
+            "CORS_ALLOW_CREDENTIALS is true but CORS_ORIGINS is *; using allow_credentials=False (browser rules)."
+        )
+    return {
+        "allow_origins": origins,
+        "allow_credentials": allow_credentials,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+
+
+app.add_middleware(CORSMiddleware, **_cors_middleware_kwargs())
 
 
 class SyllabusTextBody(BaseModel):
@@ -111,10 +125,13 @@ def _startup() -> None:
         ensure_demo_user()
     except Exception as e:  # noqa: BLE001
         logger.warning("Demo user bootstrap skipped: %s", e)
-    try:
-        start_notification_scheduler()
-    except Exception:  # noqa: BLE001
-        logger.warning("Notification scheduler not started (missing deps or DB tables?)", exc_info=True)
+    if get_settings().enable_notification_scheduler:
+        try:
+            start_notification_scheduler()
+        except Exception:  # noqa: BLE001
+            logger.warning("Notification scheduler not started (missing deps or DB tables?)", exc_info=True)
+    else:
+        logger.info("Notification scheduler disabled (ENABLE_NOTIFICATION_SCHEDULER=false)")
 
 
 @app.get("/health")
