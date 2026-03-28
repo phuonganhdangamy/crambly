@@ -11,3 +11,4 @@ Technical docs for developers working on the repo. Product positioning and judge
 | [frontend-web.md](./frontend-web.md) | Next.js app routes, data fetching, study deck UI, **light mode** (theme tokens) |
 | [agents-and-tasks.md](./agents-and-tasks.md) | Python agents vs `tasks/` workers, Gemini usage |
 | [deployment-plan.md](./deployment-plan.md) | Deploy topology, env checklist, scaling notes, production backlog |
+| [auth-plan.md](./auth-plan.md) | Phased plan: Supabase Auth, RLS by user, JWT for FastAPI, web session |

@@ -1,5 +1,6 @@
 "use client";
 
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -10,22 +11,20 @@ import { StudyHeatmap } from "@/components/dashboard/StudyHeatmap";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { HomeLanding } from "@/components/home/HomeLanding";
 import { fetchCourseAggregate, fetchCourses, fetchUploads, type PriorityCard } from "@/lib/api";
+import { useAuthSession } from "@/hooks/useAuthSession";
 import { getRecentActivity, type ActivityItem } from "@/lib/localActivity";
-import { demoUserId } from "@/lib/user";
+import { getSupabaseBrowser } from "@/lib/supabase";
 
-function greetingName() {
-  const id = demoUserId();
-  return id.slice(0, 8);
-}
-
+/** Calendar days from today to due date (local). Negative if due date is in the past. */
 function daysUntil(iso: string) {
   try {
-    const d = new Date(iso + "T12:00:00");
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    d.setHours(0, 0, 0, 0);
-    return Math.ceil((d.getTime() - t.getTime()) / 86400000);
+    const due = new Date(iso + "T12:00:00");
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startDue = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+    return Math.round((startDue.getTime() - startToday.getTime()) / 86400000);
   } catch {
     return 999;
   }
@@ -44,9 +43,12 @@ function pickPriorityCourseId(courses: { id: string; next_assessment_date?: stri
 
 export default function Home() {
   const router = useRouter();
+  const { status } = useAuthSession();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
-  const coursesQ = useQuery({ queryKey: ["courses"], queryFn: fetchCourses });
-  const uploadsQ = useQuery({ queryKey: ["uploads"], queryFn: fetchUploads });
+  const [greetingName, setGreetingName] = useState("there");
+  const signedIn = status === "signedIn";
+  const coursesQ = useQuery({ queryKey: ["courses"], queryFn: fetchCourses, enabled: signedIn });
+  const uploadsQ = useQuery({ queryKey: ["uploads"], queryFn: fetchUploads, enabled: signedIn });
 
   const priorityCourseId = useMemo(
     () => (coursesQ.data ? pickPriorityCourseId(coursesQ.data) : null),
@@ -56,7 +58,7 @@ export default function Home() {
   const aggQ = useQuery({
     queryKey: ["courseAggregate", priorityCourseId],
     queryFn: () => fetchCourseAggregate(priorityCourseId!),
-    enabled: Boolean(priorityCourseId),
+    enabled: signedIn && Boolean(priorityCourseId),
   });
 
   const topAssessment: PriorityCard | null = useMemo(() => {
@@ -93,6 +95,22 @@ export default function Home() {
     setActivity(getRecentActivity(5));
   }, []);
 
+  useEffect(() => {
+    const sb = getSupabaseBrowser();
+    if (!sb) return;
+    void sb.auth.getSession().then((res: { data: { session: { user?: { email?: string | null } } | null } }) => {
+      const em = res.data.session?.user?.email;
+      if (em) setGreetingName(em.split("@")[0] ?? "there");
+    });
+    const {
+      data: { subscription },
+    } = sb.auth.onAuthStateChange((_e: AuthChangeEvent, session: Session | null) => {
+      const em = session?.user?.email;
+      setGreetingName(em ? em.split("@")[0] ?? "there" : "there");
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
   const now = new Date();
   const dateStr = now.toLocaleDateString(undefined, {
     weekday: "long",
@@ -101,8 +119,20 @@ export default function Home() {
     year: "numeric",
   });
 
-  const dueSoon =
-    topAssessment && topAssessment.due_date ? daysUntil(topAssessment.due_date) <= 3 : false;
+  const daysToTop = topAssessment?.due_date ? daysUntil(topAssessment.due_date) : null;
+  const dueSoon = daysToTop != null && daysToTop >= 0 && daysToTop <= 3;
+
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>
+      </div>
+    );
+  }
+
+  if (status === "signedOut") {
+    return <HomeLanding />;
+  }
 
   return (
     <div className="space-y-10">
@@ -115,7 +145,7 @@ export default function Home() {
         <p className="text-sm text-[var(--color-accent-cyan)]">Dashboard</p>
         <h1 className="text-3xl font-bold text-[var(--color-text-primary)] md:text-4xl">
           Good {now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"},{" "}
-          <span className="text-[var(--color-accent-cyan)]">{greetingName()}</span> 👋
+          <span className="text-[var(--color-accent-cyan)]">{greetingName}</span> 👋
         </h1>
         <p className="text-[var(--color-text-secondary)]">
           {dateStr}
@@ -160,7 +190,13 @@ export default function Home() {
                   <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{topAssessment.name}</h2>
                   <p className="text-sm text-[var(--color-text-secondary)]">
                     {topAssessment.due_date
-                      ? `${daysUntil(topAssessment.due_date)} days remaining`
+                      ? daysToTop == null
+                        ? "No date"
+                        : daysToTop < 0
+                          ? "Past due"
+                          : daysToTop === 0
+                            ? "Due today"
+                            : `${daysToTop} day${daysToTop === 1 ? "" : "s"} remaining`
                       : "No date"}{" "}
                     · weight{" "}
                     <span className="font-bold text-[var(--color-accent-orange)]">

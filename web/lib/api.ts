@@ -1,14 +1,33 @@
 import type { LearnerMode, PulsePayload, QuizQuestion } from "@crambly/types";
-import { apiBase, demoUserId } from "./user";
+import { getSupabaseBrowser } from "./supabase";
+import { apiBase, getAccessToken, sessionUserId } from "./user";
 
 const jsonHeaders = { "Content-Type": "application/json" };
+
+async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const run = async () => {
+    const headers = new Headers(init?.headers);
+    const t = await getAccessToken();
+    if (t) headers.set("Authorization", `Bearer ${t}`);
+    return fetch(input, { ...init, headers });
+  };
+  let res = await run();
+  if (res.status === 401) {
+    const sb = getSupabaseBrowser();
+    if (sb) {
+      await sb.auth.refreshSession();
+      res = await run();
+    }
+  }
+  return res;
+}
 
 export async function uploadFile(file: File, fileType: string, courseId?: string | null) {
   const fd = new FormData();
   fd.append("file", file);
   fd.append("file_type", fileType);
   if (courseId) fd.append("course_id", courseId);
-  const res = await fetch(`${apiBase()}/api/upload`, {
+  const res = await apiFetch(`${apiBase()}/api/upload`, {
     method: "POST",
     body: fd,
   });
@@ -17,8 +36,8 @@ export async function uploadFile(file: File, fileType: string, courseId?: string
 }
 
 export async function fetchUploads() {
-  const uid = demoUserId();
-  const res = await fetch(`${apiBase()}/api/uploads/${uid}`);
+  const uid = await sessionUserId();
+  const res = await apiFetch(`${apiBase()}/api/uploads/${uid}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<
     {
@@ -36,7 +55,7 @@ export async function fetchUploads() {
 }
 
 export async function fetchUploadMeta(uploadId: string) {
-  const res = await fetch(`${apiBase()}/api/upload-meta/${uploadId}`);
+  const res = await apiFetch(`${apiBase()}/api/upload-meta/${uploadId}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<{ learner_mode: LearnerMode | null; complexity_dial: number | null }>;
 }
@@ -51,7 +70,7 @@ export interface UploadPage {
 
 export async function fetchUploadPages(uploadId: string): Promise<UploadPage[]> {
   // Same-origin Next.js route proxies to FastAPI (see app/api/upload/[uploadId]/pages/route.ts).
-  const res = await fetch(`/api/upload/${encodeURIComponent(uploadId)}/pages`, { cache: "no-store" });
+  const res = await apiFetch(`/api/upload/${encodeURIComponent(uploadId)}/pages`, { cache: "no-store" });
   if (!res.ok) {
     const t = await res.text();
     throw new Error(t || `HTTP ${res.status}`);
@@ -61,8 +80,8 @@ export async function fetchUploadPages(uploadId: string): Promise<UploadPage[]> 
 }
 
 export async function fetchTwin() {
-  const uid = demoUserId();
-  const res = await fetch(`${apiBase()}/api/twin/${uid}`);
+  const uid = await sessionUserId();
+  const res = await apiFetch(`${apiBase()}/api/twin/${uid}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<{ digital_twin: Record<string, unknown> }>;
 }
@@ -110,7 +129,7 @@ export type StudyTransformPayload = {
 };
 
 export async function postTransform(uploadId: string, mode: LearnerMode, complexityDial?: number | null) {
-  const res = await fetch(`${apiBase()}/api/transform`, {
+  const res = await apiFetch(`${apiBase()}/api/transform`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({
@@ -133,7 +152,7 @@ export async function probeTransformCache(
   if (complexityDial !== undefined && complexityDial !== null) {
     params.set("complexity_dial", String(complexityDial));
   }
-  const res = await fetch(`${apiBase()}/api/transform/cache?${params}`, { signal: opts?.signal });
+  const res = await apiFetch(`${apiBase()}/api/transform/cache?${params}`, { signal: opts?.signal });
   if (!res.ok) return { cached: false, payload: null };
   return res.json() as Promise<{ cached: boolean; payload: StudyTransformPayload | null }>;
 }
@@ -152,7 +171,7 @@ export async function streamTransform(
 ): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${apiBase()}/api/transform/stream`, {
+    res = await apiFetch(`${apiBase()}/api/transform/stream`, {
       method: "POST",
       headers: jsonHeaders,
       body: JSON.stringify({
@@ -225,7 +244,7 @@ export async function streamTransform(
 }
 
 export async function postPreferences(preferred_format: string, complexity_dial: number) {
-  const res = await fetch(`${apiBase()}/api/preferences`, {
+  const res = await apiFetch(`${apiBase()}/api/preferences`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({ preferred_format, complexity_dial }),
@@ -238,7 +257,7 @@ export async function postSyllabus(file: File, courseId?: string | null) {
   const fd = new FormData();
   fd.append("file", file);
   if (courseId) fd.append("course_id", courseId);
-  const res = await fetch(`${apiBase()}/api/syllabus`, {
+  const res = await apiFetch(`${apiBase()}/api/syllabus`, {
     method: "POST",
     body: fd,
   });
@@ -256,7 +275,7 @@ export async function postSyllabus(file: File, courseId?: string | null) {
 }
 
 export async function postTts(text: string) {
-  const res = await fetch(`${apiBase()}/api/tts`, {
+  const res = await apiFetch(`${apiBase()}/api/tts`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({ text }),
@@ -277,13 +296,13 @@ export type NotificationPreferences = {
 };
 
 export async function fetchNotificationPreferences(): Promise<NotificationPreferences> {
-  const res = await fetch(`${apiBase()}/api/notifications/preferences`);
+  const res = await apiFetch(`${apiBase()}/api/notifications/preferences`);
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<NotificationPreferences>;
 }
 
 export async function saveNotificationPreferences(patch: Partial<NotificationPreferences>) {
-  const res = await fetch(`${apiBase()}/api/notifications/preferences`, {
+  const res = await apiFetch(`${apiBase()}/api/notifications/preferences`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify(patch),
@@ -293,7 +312,7 @@ export async function saveNotificationPreferences(patch: Partial<NotificationPre
 }
 
 export async function postNotificationTestDigest() {
-  const res = await fetch(`${apiBase()}/api/notifications/test-digest`, { method: "POST" });
+  const res = await apiFetch(`${apiBase()}/api/notifications/test-digest`, { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<{ ok: boolean; message?: string }>;
 }
@@ -302,7 +321,7 @@ export async function postEmailLessonExport(
   uploadId: string,
   body: { email?: string; learner_mode: string; complexity_dial?: number | null },
 ) {
-  const res = await fetch(`${apiBase()}/api/uploads/${encodeURIComponent(uploadId)}/email-lesson`, {
+  const res = await apiFetch(`${apiBase()}/api/uploads/${encodeURIComponent(uploadId)}/email-lesson`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({
@@ -325,7 +344,7 @@ export async function postAudioClipMeta(payload: {
   transcript: string;
   concept_id?: string | null;
 }) {
-  const res = await fetch(`${apiBase()}/api/audio-clips`, {
+  const res = await apiFetch(`${apiBase()}/api/audio-clips`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify(payload),
@@ -335,7 +354,7 @@ export async function postAudioClipMeta(payload: {
 }
 
 export async function postStudyDna(notes: string) {
-  const res = await fetch(`${apiBase()}/api/study-dna`, {
+  const res = await apiFetch(`${apiBase()}/api/study-dna`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({ notes }),
@@ -382,13 +401,13 @@ export function parseStoredMemeRecap(raw: unknown): MemePipelineResponse | null 
 }
 
 export async function fetchMemeRecap(uploadId: string) {
-  const res = await fetch(`${apiBase()}/api/meme/stored/${uploadId}`);
+  const res = await apiFetch(`${apiBase()}/api/meme/stored/${uploadId}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<{ meme_recap: unknown }>;
 }
 
 export async function putMemeRecap(uploadId: string, payload: MemePipelineResponse) {
-  const res = await fetch(`${apiBase()}/api/meme/stored/${uploadId}`, {
+  const res = await apiFetch(`${apiBase()}/api/meme/stored/${uploadId}`, {
     method: "PUT",
     headers: jsonHeaders,
     body: JSON.stringify(payload),
@@ -403,7 +422,7 @@ export async function postMeme(
   opts?: { reimagine?: boolean; priorBrief?: MemeBrief | null },
 ) {
   const reimagine = Boolean(opts?.reimagine);
-  const res = await fetch(`${apiBase()}/api/meme`, {
+  const res = await apiFetch(`${apiBase()}/api/meme`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({
@@ -418,8 +437,8 @@ export async function postMeme(
 }
 
 export async function fetchPulse(): Promise<PulsePayload> {
-  const uid = demoUserId();
-  const res = await fetch(`${apiBase()}/api/pulse/${uid}`);
+  const uid = await sessionUserId();
+  const res = await apiFetch(`${apiBase()}/api/pulse/${uid}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -456,14 +475,14 @@ export type YouTubeSuggestionGroup = {
 };
 
 export async function fetchStudyDeck(uploadId: string): Promise<StudyDeckRow | null> {
-  const res = await fetch(`${apiBase()}/api/deck/${uploadId}`);
+  const res = await apiFetch(`${apiBase()}/api/deck/${uploadId}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<StudyDeckRow>;
 }
 
 export async function postDeckGenerate(uploadId: string) {
-  const res = await fetch(`${apiBase()}/api/deck/generate`, {
+  const res = await apiFetch(`${apiBase()}/api/deck/generate`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({ upload_id: uploadId }),
@@ -473,25 +492,25 @@ export async function postDeckGenerate(uploadId: string) {
 }
 
 export async function deleteStudyDeck(uploadId: string) {
-  const res = await fetch(`${apiBase()}/api/deck/${uploadId}`, { method: "DELETE" });
+  const res = await apiFetch(`${apiBase()}/api/deck/${uploadId}`, { method: "DELETE" });
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<{ ok: boolean }>;
 }
 
 export async function deleteCourse(courseId: string) {
-  const res = await fetch(`${apiBase()}/api/course/${courseId}`, { method: "DELETE" });
+  const res = await apiFetch(`${apiBase()}/api/course/${courseId}`, { method: "DELETE" });
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<{ ok: boolean }>;
 }
 
 export async function deleteUpload(uploadId: string) {
-  const res = await fetch(`${apiBase()}/api/upload/${uploadId}`, { method: "DELETE" });
+  const res = await apiFetch(`${apiBase()}/api/upload/${uploadId}`, { method: "DELETE" });
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<{ ok: boolean }>;
 }
 
 export async function postMemeRegenerate(uploadId: string) {
-  const res = await fetch(`${apiBase()}/api/meme/regenerate`, {
+  const res = await apiFetch(`${apiBase()}/api/meme/regenerate`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({ upload_id: uploadId }),
@@ -506,13 +525,30 @@ export async function postMemeRegenerate(uploadId: string) {
 }
 
 export async function fetchQuizBurstForUpload(uploadId: string): Promise<{ questions: QuizQuestion[] }> {
-  const res = await fetch(`${apiBase()}/api/quiz-burst/upload/${uploadId}`);
+  const res = await apiFetch(`${apiBase()}/api/quiz-burst/upload/${uploadId}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
+/** Signed storage URL for original file preview (Focus / original pane). Requires Bearer when auth is enabled. */
+export async function fetchUploadViewUrl(uploadId: string): Promise<{
+  url: string;
+  file_type: string;
+  file_name: string;
+}> {
+  const res = await apiFetch(`${apiBase()}/api/upload/${encodeURIComponent(uploadId)}/view-url`);
+  if (!res.ok) throw new Error(await res.text());
+  const data = (await res.json()) as { url?: string; file_type?: string; file_name?: string };
+  if (!data.url) throw new Error("No file URL returned");
+  return {
+    url: data.url,
+    file_type: String(data.file_type || "pdf"),
+    file_name: String(data.file_name || "file"),
+  };
+}
+
 export async function fetchConceptsByUpload(uploadId: string) {
-  const res = await fetch(`${apiBase()}/api/concepts/by-upload/${uploadId}`);
+  const res = await apiFetch(`${apiBase()}/api/concepts/by-upload/${uploadId}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<
     {
@@ -527,7 +563,7 @@ export async function fetchConceptsByUpload(uploadId: string) {
 }
 
 export async function postQuizResult(conceptId: string, correct: boolean) {
-  const res = await fetch(`${apiBase()}/api/quiz/result`, {
+  const res = await apiFetch(`${apiBase()}/api/quiz/result`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({ concept_id: conceptId, correct }),
@@ -558,14 +594,14 @@ export type PriorityCard = {
 };
 
 export async function fetchCourses(): Promise<CourseRow[]> {
-  const uid = demoUserId();
-  const res = await fetch(`${apiBase()}/api/courses/${uid}`);
+  const uid = await sessionUserId();
+  const res = await apiFetch(`${apiBase()}/api/courses/${uid}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function postCourse(payload: { name: string; code: string; color: string }) {
-  const res = await fetch(`${apiBase()}/api/courses`, {
+  const res = await apiFetch(`${apiBase()}/api/courses`, {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify(payload),
@@ -575,7 +611,7 @@ export async function postCourse(payload: { name: string; code: string; color: s
 }
 
 export async function fetchCourseUploads(courseId: string) {
-  const res = await fetch(`${apiBase()}/api/courses/${courseId}/uploads`);
+  const res = await apiFetch(`${apiBase()}/api/courses/${courseId}/uploads`);
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<
     {
@@ -589,7 +625,7 @@ export async function fetchCourseUploads(courseId: string) {
 }
 
 export async function fetchCourseAggregate(courseId: string) {
-  const res = await fetch(`${apiBase()}/api/courses/${courseId}/aggregate`);
+  const res = await apiFetch(`${apiBase()}/api/courses/${courseId}/aggregate`);
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<{
     course: CourseRow;

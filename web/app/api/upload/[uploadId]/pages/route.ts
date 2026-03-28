@@ -7,7 +7,7 @@ export const runtime = "nodejs";
  * (avoids CORS / wrong NEXT_PUBLIC_API_URL when the backend runs on another host).
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: { uploadId: string } },
 ) {
   const uploadId = params.uploadId?.trim();
@@ -17,9 +17,13 @@ export async function GET(
 
   const api = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
   const url = `${api}/api/upload/${encodeURIComponent(uploadId)}/pages`;
+  const auth = req.headers.get("authorization");
 
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, {
+      cache: "no-store",
+      headers: auth ? { Authorization: auth } : undefined,
+    });
     const text = await res.text();
     if (!res.ok) {
       return NextResponse.json(

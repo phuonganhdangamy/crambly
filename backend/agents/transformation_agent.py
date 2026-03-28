@@ -10,8 +10,9 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Iterator
+from uuid import UUID
 
-from db import ensure_demo_user, supabase_client
+from db import ensure_app_user, supabase_client
 from gemini_client import extract_json_blob, generate_text
 
 logger = logging.getLogger(__name__)
@@ -234,7 +235,7 @@ def run_transform(
     """
     Returns JSON suitable for the study page: summary, concept_map, key_terms, sections.
     """
-    ensure_demo_user()
+    ensure_app_user(UUID(user_id))
     sb = supabase_client()
 
     sb.table("uploads").update(
@@ -419,7 +420,7 @@ def iter_transform_ndjson(
     Stream NDJSON lines: sections_batch ... synthesis.
     Updates uploads.study_cache incrementally (partial=True) then final partial=False.
     """
-    ensure_demo_user()
+    ensure_app_user(UUID(user_id))
     sb = supabase_client()
     sb.table("uploads").update(
         {

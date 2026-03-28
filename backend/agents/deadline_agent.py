@@ -12,8 +12,10 @@ import logging
 from datetime import date, datetime, timezone
 from typing import Any
 
+from uuid import UUID
+
 from config import get_settings
-from db import ensure_demo_user, supabase_client
+from db import ensure_app_user, supabase_client
 from gemini_client import extract_json_blob, generate_multimodal, generate_text
 
 logger = logging.getLogger(__name__)
@@ -76,7 +78,7 @@ def _message(name: str, due: date, today: date, weight: float, topics: list[str]
 
 def recompute_priorities_for_user(user_id: str) -> list[dict[str, Any]]:
     """Reload assessments + twin, update priority_score, return ranked cards."""
-    ensure_demo_user()
+    ensure_app_user(UUID(user_id))
     sb = supabase_client()
     s = get_settings()
     today = datetime.now(timezone.utc).date()
@@ -108,7 +110,15 @@ def recompute_priorities_for_user(user_id: str) -> list[dict[str, Any]]:
     rows = res.data or []
     updated: list[dict[str, Any]] = []
     for a in rows:
-        due = date.fromisoformat(str(a["due_date"]))
+        try:
+            due = date.fromisoformat(str(a["due_date"]))
+        except ValueError:
+            logger.warning("Skipping assessment %s: invalid due_date", a.get("id"))
+            continue
+        # Past deadlines are not priorities; keep score low so pulse/UI ignore them.
+        if due < today:
+            sb.table("assessments").update({"priority_score": 0.0}).eq("id", a["id"]).execute()
+            continue
         u = _urgency(due, today, s.total_semester_days)
         aid = a.get("course_id")
         if aid:
@@ -152,7 +162,7 @@ def run_deadline_from_bytes(
     content_type: str | None,
     course_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    ensure_demo_user()
+    ensure_app_user(UUID(user_id))
     sb = supabase_client()
     mime = content_type or "application/pdf"
     raw = generate_multimodal(SYLLABUS_PROMPT, mime_type=mime, data=file_bytes)
@@ -166,7 +176,7 @@ def run_deadline_from_text(
     syllabus_text: str,
     course_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    ensure_demo_user()
+    ensure_app_user(UUID(user_id))
     raw = generate_text(SYLLABUS_PROMPT + "\n\nSYLLABUS TEXT:\n" + syllabus_text[:12000])
     assessments = _parse_assessments(extract_json_blob(raw))
     return _persist_and_rank(user_id, assessments, course_id=course_id)

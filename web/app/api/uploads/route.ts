@@ -1,17 +1,18 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import type { FocusUploadRow } from "@/lib/focusUploadApi";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-const DEMO_UID = process.env.NEXT_PUBLIC_DEMO_USER_ID || "00000000-0000-0000-0000-000000000001";
-
 /** When Next.js has no Supabase browser keys, reuse the FastAPI list (backend already talks to Supabase). */
-async function fetchUploadsViaBackend(): Promise<FocusUploadRow[] | null> {
+async function fetchUploadsViaBackend(uid: string, accessToken: string | null): Promise<FocusUploadRow[] | null> {
   const api = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   try {
-    const res = await fetch(`${api.replace(/\/$/, "")}/api/uploads/${DEMO_UID}`, {
+    const headers: HeadersInit = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+    const res = await fetch(`${api.replace(/\/$/, "")}/api/uploads/${uid}`, {
       cache: "no-store",
+      headers,
     });
     if (!res.ok) return null;
     const rows = (await res.json()) as Record<string, unknown>[];
@@ -35,10 +36,23 @@ async function fetchUploadsViaBackend(): Promise<FocusUploadRow[] | null> {
 export async function GET() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const uid = DEMO_UID;
+
+  let uid: string | null = null;
+  let accessToken: string | null = null;
+  try {
+    const supabase = await createServerSupabaseClient();
+    const { data } = await supabase.auth.getSession();
+    uid = data.session?.user?.id ?? null;
+    accessToken = data.session?.access_token ?? null;
+  } catch {
+    uid = null;
+  }
+
+  const demoUid = process.env.NEXT_PUBLIC_DEMO_USER_ID || "00000000-0000-0000-0000-000000000001";
+  const effectiveUid = uid ?? demoUid;
 
   if (!url || !key) {
-    const fallback = await fetchUploadsViaBackend();
+    const fallback = await fetchUploadsViaBackend(effectiveUid, accessToken);
     if (fallback) {
       return NextResponse.json(fallback);
     }
@@ -51,12 +65,16 @@ export async function GET() {
     );
   }
 
-  const sb = createClient(url, key);
+  const sb = createClient(url, key, {
+    global: {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    },
+  });
 
   const { data: ups, error: upErr } = await sb
     .from("uploads")
     .select("id,file_name,status,created_at,course_id")
-    .eq("user_id", uid)
+    .eq("user_id", effectiveUid)
     .order("created_at", { ascending: false });
 
   if (upErr) {

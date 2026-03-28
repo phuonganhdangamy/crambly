@@ -18,7 +18,9 @@ import google.generativeai as genai
 from google.api_core import exceptions as google_api_exceptions
 
 from config import get_settings
-from db import ensure_demo_user, supabase_client, vector_to_pg
+from uuid import UUID
+
+from db import ensure_app_user, supabase_client, vector_to_pg
 from gemini_client import (
     configure_gemini,
     embed_texts_optional,
@@ -401,7 +403,7 @@ def run_ingestion(
     Persist file to Supabase Storage, parse with Gemini, write `concepts` rows.
     Returns `{ "upload_id": str, "concepts_count": int }`.
     """
-    ensure_demo_user()
+    ensure_app_user(UUID(user_id))
     sb = supabase_client()
     s = get_settings()
     if course_id:

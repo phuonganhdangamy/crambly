@@ -19,12 +19,15 @@ def supabase_client() -> Client:
 def ensure_demo_user() -> UUID:
     """Upsert the hardcoded demo user used when auth UI is disabled."""
     s = get_settings()
-    uid = str(s.crambly_demo_user_id)
-    sb = supabase_client()
-    sb.table("users").upsert(
-        {"id": uid, "email": s.crambly_demo_user_email},
-    ).execute()
+    ensure_app_user(s.crambly_demo_user_id, s.crambly_demo_user_email)
     return s.crambly_demo_user_id
+
+
+def ensure_app_user(user_id: UUID, email: str | None = None) -> None:
+    """Ensure a row exists in public.users (id matches Supabase Auth user)."""
+    sb = supabase_client()
+    em = (email or "").strip() or f"user-{user_id}@users.local"
+    sb.table("users").upsert({"id": str(user_id), "email": em}).execute()
 
 
 def vector_to_pg(vec: list[float]) -> str:

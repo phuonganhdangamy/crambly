@@ -10,7 +10,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from db import ensure_demo_user, supabase_client
+from uuid import UUID
+
+from db import ensure_app_user, supabase_client
 from gemini_client import extract_json_blob, generate_text
 
 logger = logging.getLogger(__name__)
@@ -39,7 +41,7 @@ def _ensure_twin_row(user_id: str) -> None:
 
 
 def run_study_dna(*, user_id: str, notes_text: str) -> dict[str, Any]:
-    ensure_demo_user()
+    ensure_app_user(UUID(user_id))
     sb = supabase_client()
     _ensure_twin_row(user_id)
 
