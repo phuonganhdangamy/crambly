@@ -19,7 +19,7 @@ export function demoUserId(): string {
 export async function getSupabaseSession(): Promise<Session | null> {
   const sb = getSupabaseBrowser();
   if (!sb) return null;
-  let { data } = await sb.auth.getSession();
+  const { data } = await sb.auth.getSession();
   let session = data.session ?? null;
   if (!session) {
     const { data: r } = await sb.auth.refreshSession();
