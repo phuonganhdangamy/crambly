@@ -10,3 +10,4 @@ Technical docs for developers working on the repo. Product positioning and judge
 | [backend-api.md](./backend-api.md) | FastAPI entrypoint, router layout, notable routes |
 | [frontend-web.md](./frontend-web.md) | Next.js app routes, data fetching, study deck UI, **light mode** (theme tokens) |
 | [agents-and-tasks.md](./agents-and-tasks.md) | Python agents vs `tasks/` workers, Gemini usage |
+| [deployment-plan.md](./deployment-plan.md) | Deploy topology, env checklist, scaling notes, production backlog |

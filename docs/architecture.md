@@ -69,6 +69,7 @@ There is no full auth UI in the MVP path: the backend uses a fixed **demo user U
 
 ## Deployment shape (typical)
 
-- FastAPI on a host or container, exposed with CORS `*` for local dev.
+- FastAPI on a host or container; set **`CORS_ORIGINS`** to your web origin(s) in production (see [deployment-plan.md](./deployment-plan.md)).
 - Next.js on Vercel or similar; `NEXT_PUBLIC_API_URL` points at the API.
 - Supabase project with migrations applied in order (see [database-and-storage.md](./database-and-storage.md)).
+- Multiple API replicas: set **`ENABLE_NOTIFICATION_SCHEDULER=false`** on all but one instance so digest/reminder jobs do not run twice.

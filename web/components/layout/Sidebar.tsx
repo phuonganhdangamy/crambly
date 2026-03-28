@@ -4,7 +4,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useState } from "react";
 import { useChrome } from "./ChromeContext";
 
 const LS_FIRST = "crambly_sidebar_animated_v1";
