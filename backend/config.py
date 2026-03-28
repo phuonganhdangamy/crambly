@@ -5,6 +5,7 @@ Central settings for the FastAPI service. Loads from environment / .env at repo 
 from functools import lru_cache
 from uuid import UUID
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +19,12 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     supabase_url: str = ""
     supabase_service_key: str = ""
+    # JWT secret from Supabase Dashboard → Project Settings → API → JWT Secret (verify HS256 access tokens).
+    supabase_jwt_secret: str = ""
+    # If true, API uses CRAMBLY_DEMO_USER_ID and ignores Authorization (local/dev without JWT).
+    # Set false in production with SUPABASE_JWT_SECRET and Bearer tokens from the web app.
+    # Env must be CRAMBLY_AUTH_DISABLED (not AUTH_DISABLED — that was a silent footgun).
+    auth_disabled: bool = Field(default=True, validation_alias="CRAMBLY_AUTH_DISABLED")
     supabase_upload_bucket: str = "uploads"
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"

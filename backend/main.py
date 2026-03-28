@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterator, Literal
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,8 +30,9 @@ from agents.study_dna_agent import run_study_dna
 from agents.expressive_media_agent import run_meme_pipeline
 from agents.transformation_agent import iter_transform_ndjson, run_transform, transform_study_cache_key
 from api.routes import api_router
+from auth import get_current_user_id, require_uid_match
 from config import Settings, get_settings
-from db import ensure_demo_user, supabase_client
+from db import ensure_app_user, ensure_demo_user, supabase_client
 from tasks.common import storage_signed_url
 from scheduler import start_notification_scheduler
 from tts_synthesis import synthesize_study_audio
@@ -46,7 +48,7 @@ app.include_router(api_router, prefix="/api")
 def _cors_middleware_kwargs() -> dict[str, Any]:
     s = get_settings()
     raw = (s.cors_origins or "*").strip()
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    parts = [p.strip().rstrip("/") for p in raw.split(",") if p.strip()]
     origins = parts if parts else ["*"]
     wildcard = len(origins) == 1 and origins[0] == "*"
     allow_credentials = bool(s.cors_allow_credentials) and not wildcard
@@ -121,10 +123,11 @@ class MemeRecapStoredBody(BaseModel):
 
 @app.on_event("startup")
 def _startup() -> None:
-    try:
-        ensure_demo_user()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Demo user bootstrap skipped: %s", e)
+    if get_settings().auth_disabled:
+        try:
+            ensure_demo_user()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Demo user bootstrap skipped: %s", e)
     if get_settings().enable_notification_scheduler:
         try:
             start_notification_scheduler()
@@ -146,8 +149,10 @@ async def api_upload(
     file_type: str = Form("pdf"),
     course_id: str | None = Form(None),
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     data = await file.read()
     if not data:
         raise HTTPException(400, "Empty file")
@@ -184,8 +189,10 @@ async def api_syllabus(
     file: UploadFile | None = File(None),
     course_id: str | None = Form(None),
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> list[dict[str, Any]]:
-    user_id = str(settings.crambly_demo_user_id)
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     if file is None:
         raise HTTPException(400, "Attach syllabus file")
     data = await file.read()
@@ -210,8 +217,10 @@ async def api_syllabus(
 def api_syllabus_text(
     body: SyllabusTextBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> list[dict[str, Any]]:
-    user_id = str(settings.crambly_demo_user_id)
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     cid = (body.course_id or "").strip() or None
     try:
         return run_deadline_from_text(user_id=user_id, syllabus_text=body.text, course_id=cid)
@@ -221,9 +230,13 @@ def api_syllabus_text(
 
 
 @app.get("/api/assessments/{uid}")
-def api_assessments(uid: str, settings: Settings = Depends(get_settings)) -> list[dict[str, Any]]:
-    if uid != str(settings.crambly_demo_user_id):
-        raise HTTPException(403, "Demo only supports configured user id")
+def api_assessments(
+    uid: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> list[dict[str, Any]]:
+    _ = settings
+    require_uid_match(uid, user_uuid)
     try:
         return recompute_priorities_for_user(uid)
     except Exception as e:  # noqa: BLE001
@@ -234,9 +247,10 @@ def api_assessments(uid: str, settings: Settings = Depends(get_settings)) -> lis
 def api_transform(
     body: TransformBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
 
     allowed_modes = {"adhd", "visual", "global_scholar", "audio", "exam_cram"}
     mode_key = body.mode if body.mode in allowed_modes else "adhd"
@@ -321,9 +335,11 @@ def api_transform_cache(
     mode: str,
     complexity_dial: float | None = Query(default=None),
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     allowed_modes = {"adhd", "visual", "global_scholar", "audio", "exam_cram"}
     mode_key = mode if mode in allowed_modes else "adhd"
     cache_key = transform_study_cache_key(mode_key, complexity_dial)
@@ -364,9 +380,11 @@ def api_transform_cache(
 def api_transform_stream(
     body: TransformBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> StreamingResponse:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     allowed_modes = {"adhd", "visual", "global_scholar", "audio", "exam_cram"}
     mode_key = body.mode if body.mode in allowed_modes else "adhd"
     try:
@@ -392,12 +410,17 @@ def api_transform_stream(
 
 
 @app.get("/api/upload-meta/{upload_id}")
-def api_upload_meta(upload_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
+def api_upload_meta(
+    upload_id: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     if not upload_id.strip():
         raise HTTPException(400, "upload_id required")
     try:
-        ensure_demo_user()
         sb = supabase_client()
         res = (
             sb.table("uploads")
@@ -421,8 +444,10 @@ def api_upload_meta(upload_id: str, settings: Settings = Depends(get_settings)) 
 def api_study_dna(
     body: StudyDnaBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
+    _ = settings
+    user_id = str(user_uuid)
     try:
         return run_study_dna(user_id=user_id, notes_text=body.notes)
     except Exception as e:  # noqa: BLE001
@@ -434,8 +459,10 @@ def api_study_dna(
 def api_quiz_result(
     body: QuizResultBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
+    _ = settings
+    user_id = str(user_uuid)
     try:
         return apply_quiz_result(user_id=user_id, concept_id=body.concept_id, correct=body.correct)
     except Exception as e:  # noqa: BLE001
@@ -444,9 +471,13 @@ def api_quiz_result(
 
 
 @app.get("/api/pulse/{uid}")
-def api_pulse(uid: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
-    if uid != str(settings.crambly_demo_user_id):
-        raise HTTPException(403, "Demo only supports configured user id")
+def api_pulse(
+    uid: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    _ = settings
+    require_uid_match(uid, user_uuid)
     try:
         return build_pulse(uid)
     except Exception as e:  # noqa: BLE001
@@ -455,10 +486,14 @@ def api_pulse(uid: str, settings: Settings = Depends(get_settings)) -> dict[str,
 
 
 @app.get("/api/twin/{uid}")
-def api_twin(uid: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
-    if uid != str(settings.crambly_demo_user_id):
-        raise HTTPException(403, "Demo only supports configured user id")
-    ensure_demo_user()
+def api_twin(
+    uid: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    _ = settings
+    require_uid_match(uid, user_uuid)
+    ensure_app_user(user_uuid)
     sb = supabase_client()
     res = sb.table("digital_twin").select("*").eq("user_id", uid).limit(1).execute()
     if not res.data:
@@ -468,10 +503,14 @@ def api_twin(uid: str, settings: Settings = Depends(get_settings)) -> dict[str, 
 
 
 @app.get("/api/uploads/{uid}")
-def api_uploads(uid: str, settings: Settings = Depends(get_settings)) -> list[dict[str, Any]]:
-    if uid != str(settings.crambly_demo_user_id):
-        raise HTTPException(403, "Demo only supports configured user id")
-    ensure_demo_user()
+def api_uploads(
+    uid: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> list[dict[str, Any]]:
+    _ = settings
+    require_uid_match(uid, user_uuid)
+    ensure_app_user(user_uuid)
     sb = supabase_client()
     ups = sb.table("uploads").select("*").eq("user_id", uid).order("created_at", desc=True).execute()
     upload_rows: list[dict[str, Any]] = list(ups.data or [])
@@ -523,13 +562,15 @@ def api_uploads(uid: str, settings: Settings = Depends(get_settings)) -> list[di
 def api_upload_view_url(
     upload_id: str,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
     """
     Signed URL for the original file in Storage (Focus Mode / slide-accurate viewing).
     Path is relative (uploads.file_url); never expose service role to the client.
     """
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     if not upload_id.strip():
         raise HTTPException(400, "upload_id required")
     sb = supabase_client()
@@ -563,10 +604,12 @@ def api_upload_view_url(
 def api_upload_pages(
     upload_id: str,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
     """Signed URLs for per-page slide PNGs (PDF ingestion). Paths stay server-side."""
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     uid = upload_id.strip()
     if not uid:
         raise HTTPException(400, "upload_id required")
@@ -623,9 +666,11 @@ def api_upload_pages(
 def api_preferences(
     body: PreferencesBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     sb = supabase_client()
     patch: dict[str, Any] = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if body.preferred_format is not None:
@@ -640,7 +685,11 @@ def api_preferences(
 
 
 @app.post("/api/tts")
-def api_tts(body: TtsBody, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+def api_tts(
+    body: TtsBody,
+    settings: Settings = Depends(get_settings),
+    _user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
     _ = settings
     import base64
 
@@ -656,7 +705,11 @@ def api_tts(body: TtsBody, settings: Settings = Depends(get_settings)) -> dict[s
 
 
 @app.post("/api/meme")
-def api_meme(body: MemeBody, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+def api_meme(
+    body: MemeBody,
+    settings: Settings = Depends(get_settings),
+    _user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
     try:
         return run_meme_pipeline(
             concept_title=body.concept_title,
@@ -674,11 +727,13 @@ def api_meme(body: MemeBody, settings: Settings = Depends(get_settings)) -> dict
 def api_meme_stored_get(
     upload_id: str,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     if not upload_id.strip():
         raise HTTPException(400, "upload_id required")
-    ensure_demo_user()
     sb = supabase_client()
     res = (
         sb.table("uploads")
@@ -698,11 +753,13 @@ def api_meme_stored_put(
     upload_id: str,
     body: MemeRecapStoredBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     if not upload_id.strip():
         raise HTTPException(400, "upload_id required")
-    ensure_demo_user()
     sb = supabase_client()
     payload = body.model_dump(exclude_none=True)
     up = (
@@ -718,9 +775,13 @@ def api_meme_stored_put(
 
 
 @app.get("/api/audio-clips/{uid}")
-def api_audio_clips(uid: str, settings: Settings = Depends(get_settings)) -> list[dict[str, Any]]:
-    if uid != str(settings.crambly_demo_user_id):
-        raise HTTPException(403, "Demo only supports configured user id")
+def api_audio_clips(
+    uid: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> list[dict[str, Any]]:
+    _ = settings
+    require_uid_match(uid, user_uuid)
     sb = supabase_client()
     res = (
         sb.table("audio_clips")
@@ -755,8 +816,10 @@ def api_audio_clips_save(
 def api_concepts_by_upload(
     upload_id: str,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> list[dict[str, Any]]:
-    user_id = str(settings.crambly_demo_user_id)
+    _ = settings
+    user_id = str(user_uuid)
     sb = supabase_client()
     up = sb.table("uploads").select("user_id").eq("id", upload_id).limit(1).execute()
     if not up.data or str(up.data[0]["user_id"]) != user_id:

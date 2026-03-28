@@ -1,8 +1,8 @@
 /**
- * Browser Supabase client for future RLS-backed reads.
- * MVP data paths go through FastAPI so keys stay consistent with the demo user.
+ * Browser Supabase client (cookie-aware via @supabase/ssr).
  */
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 
 let _client: SupabaseClient | null = null;
 
@@ -10,6 +10,6 @@ export function getSupabaseBrowser(): SupabaseClient | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
-  if (!_client) _client = createClient(url, key);
+  if (!_client) _client = createBrowserClient(url, key);
   return _client;
 }

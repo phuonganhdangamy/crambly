@@ -4,7 +4,9 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from db import ensure_demo_user, supabase_client
+from uuid import UUID
+
+from db import ensure_app_user, supabase_client
 from tasks.audio_task import run_audio_task
 from tasks.common import default_tasks_status
 from tasks.meme_task import run_meme_task
@@ -33,7 +35,7 @@ def assert_upload_ready_for_deck(upload_id: str, user_id: str) -> None:
 
 def prepare_study_deck_row(upload_id: str, user_id: str, *, reset: bool) -> None:
     """Create or reset study_deck before background workers run."""
-    ensure_demo_user()
+    ensure_app_user(UUID(user_id))
     assert_upload_ready_for_deck(upload_id, user_id)
     sb = supabase_client()
     status = default_tasks_status()

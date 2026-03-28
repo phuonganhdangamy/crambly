@@ -58,9 +58,10 @@ flowchart LR
 | **`backend/scheduler.py`** | In-process **APScheduler** jobs: email digests + exam reminders (see [implementation-flows.md](./implementation-flows.md)). |
 | **Supabase** | Source of truth for users, uploads, concepts, study deck, courses, assessments, digital twin, notification prefs. **Service role** key on backend bypasses RLS. |
 
-## Auth / identity (demo)
+## Auth / identity
 
-There is no full auth UI in the MVP path: the backend uses a fixed **demo user UUID** from config (`CRAMBLY_DEMO_USER_ID`). The web app mirrors this via `NEXT_PUBLIC_DEMO_USER_ID` for client-side Supabase filters where needed.
+- **Production:** Supabase Auth (email/password in `/login`); `public.users.id` matches `auth.users.id` (see migrations `20250333000000_auth_user_sync.sql`, `20250334000000_auth_rls.sql`). The FastAPI backend verifies **JWT** access tokens (`Authorization: Bearer`) using `SUPABASE_JWT_SECRET` unless **`CRAMBLY_AUTH_DISABLED=true`** (demo-style, no Bearer required).
+- **Web:** `@supabase/ssr` browser client + middleware; `web/lib/api.ts` attaches the session access token to API calls.
 
 ## Configuration
 

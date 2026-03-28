@@ -1,10 +1,11 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 import { MODELS } from "@/lib/models";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-const DEMO_UID = process.env.NEXT_PUBLIC_DEMO_USER_ID || "00000000-0000-0000-0000-000000000001";
+const FALLBACK_UID = process.env.NEXT_PUBLIC_DEMO_USER_ID || "00000000-0000-0000-0000-000000000001";
 
 type Body = {
   blockContent?: string;
@@ -15,10 +16,11 @@ type Body = {
 };
 
 /** Pull study_dna from FastAPI twin so simplifications match the student's fingerprint. */
-async function fetchStudyDnaHint(): Promise<string> {
+async function fetchStudyDnaHint(uid: string, accessToken: string | null): Promise<string> {
   const api = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
   try {
-    const res = await fetch(`${api}/api/twin/${DEMO_UID}`, { cache: "no-store" });
+    const headers: HeadersInit = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+    const res = await fetch(`${api}/api/twin/${uid}`, { cache: "no-store", headers });
     if (!res.ok) return "";
     const j = (await res.json()) as { digital_twin?: Record<string, unknown> };
     const raw = j.digital_twin?.study_dna;
@@ -85,7 +87,16 @@ export async function POST(req: Request) {
     const hasMath = Boolean(body.hasMath);
     const hasCode = Boolean(body.hasCode);
 
-    const studyDnaBlock = await fetchStudyDnaHint();
+    let studyDnaBlock = "";
+    try {
+      const supabase = await createServerSupabaseClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData.session?.user?.id ?? FALLBACK_UID;
+      const token = sessionData.session?.access_token ?? null;
+      studyDnaBlock = await fetchStudyDnaHint(uid, token);
+    } catch {
+      studyDnaBlock = await fetchStudyDnaHint(FALLBACK_UID, null);
+    }
 
     const prompt = `
 You are a friendly tutor. The student is stuck on dense lecture material (often Markdown or LaTeX pasted from a slide).

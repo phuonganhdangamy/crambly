@@ -74,6 +74,7 @@ def _section_to_html(sec: dict[str, Any]) -> str:
 
 def build_lesson_email_html(
     *,
+    upload_id: str,
     upload_name: str,
     cache_payload: dict[str, Any] | None,
     concepts: list[dict[str, Any]],
@@ -256,6 +257,7 @@ def send_lesson_export_email(
     has_att = bool(attachments)
 
     body_html = build_lesson_email_html(
+        upload_id=upload_id,
         upload_name=upload_name,
         cache_payload=cache_payload,
         concepts=concepts,

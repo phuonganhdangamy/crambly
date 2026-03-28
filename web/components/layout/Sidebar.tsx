@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { AuthMenu } from "@/components/auth/AuthMenu";
 import { useChrome } from "./ChromeContext";
 
 const LS_FIRST = "crambly_sidebar_animated_v1";
@@ -323,20 +324,7 @@ export function Sidebar() {
           </button>
         </div>
 
-        <div className={`flex items-center gap-2 ${expanded ? "" : "justify-center"}`}>
-          <div
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] text-sm font-semibold text-[var(--color-accent-cyan)]"
-            aria-hidden
-          >
-            DL
-          </div>
-          {expanded && (
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-[var(--color-text-primary)]">Demo Learner</p>
-              <p className="truncate text-xs text-[var(--color-text-muted)]">Focus-flow</p>
-            </div>
-          )}
-        </div>
+        <AuthMenu expanded={expanded} />
 
         <button
           type="button"

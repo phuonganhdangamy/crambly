@@ -4,22 +4,34 @@ import base64
 import logging
 from datetime import date, datetime, timezone
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
+from postgrest.exceptions import APIError
 
 from agents.delivery_agent import build_quiz_burst_for_upload
 from agents.notification_agent import send_daily_digest
 from lesson_export import send_lesson_export_email
 from agents.expressive_media_agent import run_meme_pipeline
+from auth import get_current_user_id, require_uid_match
 from config import Settings, get_settings
-from db import ensure_demo_user, supabase_client
+from db import ensure_app_user, supabase_client
 from tasks.common import fetch_concepts_for_upload, patch_study_deck, top_concept_for_meme, upload_bytes_to_storage
 from tasks.orchestrator import prepare_study_deck_row, run_study_deck_workers
 
 logger = logging.getLogger(__name__)
 
 api_router = APIRouter()
+
+
+def _assessment_card_due_on_or_after_today(card: dict[str, Any], today: date) -> bool:
+    try:
+        raw = str(card.get("due_date", "")).strip()
+        d = date.fromisoformat(raw[:10] if len(raw) >= 10 else raw)
+        return d >= today
+    except ValueError:
+        return False
 
 
 class CreateCourseBody(BaseModel):
@@ -32,9 +44,11 @@ class CreateCourseBody(BaseModel):
 def post_course(
     body: CreateCourseBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     sb = supabase_client()
     name = body.name.strip()
     code = body.code.strip().upper()
@@ -47,6 +61,12 @@ def post_course(
             .insert({"user_id": user_id, "name": name, "code": code, "color": color})
             .execute()
         )
+    except APIError as e:
+        # Postgres unique_violation on (user_id, code)
+        if e.code == "23505":
+            raise HTTPException(409, "A course with this code already exists") from e
+        logger.exception("course insert failed")
+        raise HTTPException(400, f"Could not create course: {e.message or e}") from e
     except Exception as e:  # noqa: BLE001
         logger.exception("course insert failed")
         raise HTTPException(400, f"Could not create course (duplicate code?): {e}") from e
@@ -56,9 +76,14 @@ def post_course(
 
 
 @api_router.get("/courses/{course_id}/uploads")
-def get_course_uploads(course_id: str, settings: Settings = Depends(get_settings)) -> list[dict[str, Any]]:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+def get_course_uploads(
+    course_id: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> list[dict[str, Any]]:
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     sb = supabase_client()
     c = (
         sb.table("courses")
@@ -93,9 +118,14 @@ def get_course_uploads(course_id: str, settings: Settings = Depends(get_settings
 
 
 @api_router.get("/courses/{course_id}/aggregate")
-def get_course_aggregate(course_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+def get_course_aggregate(
+    course_id: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     sb = supabase_client()
     c = (
         sb.table("courses")
@@ -160,6 +190,11 @@ def get_course_aggregate(course_id: str, settings: Settings = Depends(get_settin
     cards = recompute_priorities_for_user(user_id)
     id_set = {str(a["id"]) for a in (asm.data or [])}
     course_cards = [x for x in cards if str(x.get("assessment_id", "")) in id_set]
+    course_cards = [
+        x
+        for x in course_cards
+        if _assessment_card_due_on_or_after_today(x, today)
+    ]
 
     return {
         "course": course,
@@ -171,10 +206,14 @@ def get_course_aggregate(course_id: str, settings: Settings = Depends(get_settin
 
 
 @api_router.get("/courses/{uid}")
-def list_courses_for_user(uid: str, settings: Settings = Depends(get_settings)) -> list[dict[str, Any]]:
-    if uid != str(settings.crambly_demo_user_id):
-        raise HTTPException(403, "Demo only supports configured user id")
-    ensure_demo_user()
+def list_courses_for_user(
+    uid: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> list[dict[str, Any]]:
+    _ = settings
+    require_uid_match(uid, user_uuid)
+    ensure_app_user(user_uuid)
     sb = supabase_client()
     res = sb.table("courses").select("*").eq("user_id", uid).order("code").execute()
     today = datetime.now(timezone.utc).date()
@@ -219,8 +258,11 @@ def post_deck_generate(
     body: DeckGenerateBody,
     background_tasks: BackgroundTasks,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     uid = body.upload_id.strip()
     if not uid:
         raise HTTPException(400, "upload_id required")
@@ -236,11 +278,16 @@ def post_deck_generate(
 
 
 @api_router.get("/deck/{upload_id}")
-def get_deck(upload_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
+def get_deck(
+    upload_id: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     if not upload_id.strip():
         raise HTTPException(400, "upload_id required")
-    ensure_demo_user()
     sb = supabase_client()
     res = (
         sb.table("study_deck")
@@ -256,13 +303,18 @@ def get_deck(upload_id: str, settings: Settings = Depends(get_settings)) -> dict
 
 
 @api_router.delete("/deck/{upload_id}")
-def delete_deck(upload_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+def delete_deck(
+    upload_id: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Remove the study_deck row for an upload (upload + concepts stay)."""
-    user_id = str(settings.crambly_demo_user_id)
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     uid = upload_id.strip()
     if not uid:
         raise HTTPException(400, "upload_id required")
-    ensure_demo_user()
     sb = supabase_client()
     up = (
         sb.table("uploads")
@@ -279,13 +331,18 @@ def delete_deck(upload_id: str, settings: Settings = Depends(get_settings)) -> d
 
 
 @api_router.delete("/course/{course_id}")
-def delete_course(course_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+def delete_course(
+    course_id: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Delete a course; assessments for that course cascade, uploads lose course_id."""
-    user_id = str(settings.crambly_demo_user_id)
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     cid = course_id.strip()
     if not cid:
         raise HTTPException(400, "course_id required")
-    ensure_demo_user()
     sb = supabase_client()
     c = (
         sb.table("courses")
@@ -317,13 +374,17 @@ def delete_course(course_id: str, settings: Settings = Depends(get_settings)) ->
 
 
 @api_router.delete("/upload/{upload_id}")
-def delete_upload(upload_id: str, settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+def delete_upload(
+    upload_id: str,
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
     """Delete an upload and its concepts, study_deck, etc. (DB cascades). Best-effort storage delete."""
-    user_id = str(settings.crambly_demo_user_id)
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     uid = upload_id.strip()
     if not uid:
         raise HTTPException(400, "upload_id required")
-    ensure_demo_user()
     sb = supabase_client()
     res = (
         sb.table("uploads")
@@ -350,11 +411,13 @@ def delete_upload(upload_id: str, settings: Settings = Depends(get_settings)) ->
 def get_quiz_burst_for_upload(
     upload_id: str,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
+    _ = settings
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     if not upload_id.strip():
         raise HTTPException(400, "upload_id required")
-    ensure_demo_user()
     sb = supabase_client()
     up = (
         sb.table("uploads")
@@ -378,12 +441,13 @@ def get_quiz_burst_for_upload(
 def post_meme_regenerate(
     body: MemeRegenerateBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     uid = body.upload_id.strip()
     if not uid:
         raise HTTPException(400, "upload_id required")
-    ensure_demo_user()
     sb = supabase_client()
     up = (
         sb.table("uploads")
@@ -457,10 +521,20 @@ class NotificationPrefsBody(BaseModel):
     timezone: str | None = None
 
 
+def _user_email_fallback(sb: Any, user_id: str, settings: Settings) -> str:
+    ur = sb.table("users").select("email").eq("id", user_id).limit(1).execute()
+    if ur.data and (ur.data[0].get("email") or "").strip():
+        return str(ur.data[0]["email"]).strip()
+    return (settings.crambly_demo_user_email or "").strip() or "demo@crambly.app"
+
+
 @api_router.get("/notifications/preferences")
-def get_notification_preferences(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+def get_notification_preferences(
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     sb = supabase_client()
     try:
         res = (
@@ -476,7 +550,7 @@ def get_notification_preferences(settings: Settings = Depends(get_settings)) -> 
     if not res.data:
         return {
             "user_id": user_id,
-            "email": settings.crambly_demo_user_email,
+            "email": _user_email_fallback(sb, user_id, settings),
             "daily_digest_enabled": True,
             "daily_digest_time": "08:00",
             "exam_reminder_enabled": True,
@@ -493,16 +567,17 @@ def get_notification_preferences(settings: Settings = Depends(get_settings)) -> 
 def post_notification_preferences(
     body: NotificationPrefsBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     sb = supabase_client()
     patch = {k: v for k, v in body.model_dump(exclude_none=True).items()}
     if not patch:
         raise HTTPException(400, "No fields to update")
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
     if "email" not in patch or not (patch.get("email") or "").strip():
-        patch["email"] = settings.crambly_demo_user_email
+        patch["email"] = _user_email_fallback(sb, user_id, settings)
     existing = (
         sb.table("notification_preferences").select("id").eq("user_id", user_id).limit(1).execute()
     )
@@ -512,7 +587,7 @@ def post_notification_preferences(
         else:
             row: dict[str, Any] = {
                 "user_id": user_id,
-                "email": settings.crambly_demo_user_email,
+                "email": _user_email_fallback(sb, user_id, settings),
                 "daily_digest_enabled": True,
                 "daily_digest_time": "08:00",
                 "exam_reminder_enabled": True,
@@ -528,9 +603,12 @@ def post_notification_preferences(
 
 
 @api_router.post("/notifications/test-digest")
-def post_notification_test_digest(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+def post_notification_test_digest(
+    settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     sb = supabase_client()
     try:
         res = (
@@ -543,7 +621,7 @@ def post_notification_test_digest(settings: Settings = Depends(get_settings)) ->
     except Exception as e:  # noqa: BLE001
         raise HTTPException(503, "notification_preferences unavailable — apply migrations") from e
     email = (
-        (res.data[0].get("email") if res.data else None) or settings.crambly_demo_user_email
+        (res.data[0].get("email") if res.data else None) or _user_email_fallback(sb, user_id, settings)
     ).strip()
     try:
         send_daily_digest(user_id, email, force=True)
@@ -566,9 +644,10 @@ def post_upload_email_lesson(
     upload_id: str,
     body: EmailLessonBody,
     settings: Settings = Depends(get_settings),
+    user_uuid: UUID = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    user_id = str(settings.crambly_demo_user_id)
-    ensure_demo_user()
+    ensure_app_user(user_uuid)
+    user_id = str(user_uuid)
     uid = upload_id.strip()
     if not uid:
         raise HTTPException(400, "upload_id required")

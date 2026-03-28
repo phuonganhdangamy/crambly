@@ -11,12 +11,11 @@ import { ReaderView } from "@/components/focus/ReaderView";
 import { SlideImageReader } from "@/components/focus/SlideImageReader";
 import { useChrome } from "@/components/layout/ChromeContext";
 import type { ExplainPayload } from "@/components/focus/SimplifiedBlock";
-import { fetchUploadPages } from "@/lib/api";
+import { fetchConceptsByUpload, fetchUploadPages, fetchUploadViewUrl } from "@/lib/api";
 import type { FocusSection } from "@/lib/focusTypes";
 import type { FocusUploadRow } from "@/lib/focusUploadApi";
 import { useFocusSession } from "@/lib/focusSession";
 import { getScrollContainer, readScrollRange } from "@/lib/scrollParent";
-import { apiBase } from "@/lib/user";
 import { getSupabaseBrowser } from "@/lib/supabase";
 import { useFocusStore } from "@/store/focusStore";
 
@@ -88,20 +87,7 @@ export default function FocusReaderPage() {
   const pendingReadingScrollRef = useRef(false);
   const readingScrollElapsedSecRef = useRef(0);
 
-  const loadSignedViewUrl = useCallback(async () => {
-    const res = await fetch(`${apiBase()}/api/upload/${uploadId}/view-url`);
-    if (!res.ok) {
-      const t = await res.text();
-      throw new Error(t || `HTTP ${res.status}`);
-    }
-    const data = (await res.json()) as { url?: string; file_type?: string; file_name?: string };
-    if (!data.url) throw new Error("No file URL returned");
-    return {
-      url: data.url,
-      file_type: String(data.file_type || "pdf"),
-      file_name: String(data.file_name || "file"),
-    };
-  }, [uploadId]);
+  const loadSignedViewUrl = useCallback(() => fetchUploadViewUrl(uploadId), [uploadId]);
 
   const { sessionGoal, smartNudgesEnabled, toggleSmartNudges, sectionsReviewed, simplificationsUsed, endSession } =
     useFocusStore();
@@ -263,17 +249,9 @@ export default function FocusReaderPage() {
       }
 
       try {
-        const res = await fetch(`${apiBase()}/api/concepts/by-upload/${uploadId}`);
+        const rows = await fetchConceptsByUpload(uploadId);
         if (cancelled) return;
-        if (!res.ok) {
-          setLoadError(
-            (await res.text()) ||
-              "Could not load concepts. Configure NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY or run the FastAPI backend.",
-          );
-          return;
-        }
-        const rows = (await res.json()) as Record<string, unknown>[];
-        setSections(mapConceptRows(rows));
+        setSections(mapConceptRows(rows as Record<string, unknown>[]));
         setLoadError(null);
       } catch {
         if (!cancelled) {

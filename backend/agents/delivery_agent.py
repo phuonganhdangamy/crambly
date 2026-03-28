@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
+from uuid import UUID
 
-from db import ensure_demo_user, supabase_client
+from db import ensure_app_user, supabase_client
 from gemini_client import extract_json_blob, generate_text
 
 logger = logging.getLogger(__name__)
@@ -49,9 +50,10 @@ def _pick_concepts(user_id: str, weak_topics: list[str]) -> list[dict[str, Any]]
 
 
 def build_pulse(user_id: str) -> dict[str, Any]:
-    ensure_demo_user()
+    ensure_app_user(UUID(user_id))
     sb = supabase_client()
-    today = datetime.now(timezone.utc).date().isoformat()
+    today_d = datetime.now(timezone.utc).date()
+    today = today_d.isoformat()
 
     twin = (
         sb.table("digital_twin").select("*").eq("user_id", user_id).limit(1).execute()
@@ -65,6 +67,7 @@ def build_pulse(user_id: str) -> dict[str, Any]:
             sb.table("assessments")
             .select("*")
             .eq("user_id", user_id)
+            .gte("due_date", today)
             .order("priority_score", desc=True)
             .limit(1)
             .execute()
@@ -72,18 +75,24 @@ def build_pulse(user_id: str) -> dict[str, Any]:
         rows: list[dict[str, Any]] = list(assessments.data or [])
     except Exception:  # noqa: BLE001
         assessments = sb.table("assessments").select("*").eq("user_id", user_id).execute()
+        future_all = []
+        for a in assessments.data or []:
+            try:
+                d = date.fromisoformat(str(a.get("due_date", ""))[:10])
+                if d >= today_d:
+                    future_all.append(a)
+            except ValueError:
+                continue
         rows = sorted(
-            assessments.data or [],
+            future_all,
             key=lambda a: float(a.get("priority_score") or 0.0),
             reverse=True,
         )[:1]
     top = rows[0] if rows else None
     top_block = None
     if top:
-        from datetime import date
-
-        due = date.fromisoformat(str(top["due_date"]))
-        days = max((due - datetime.now(timezone.utc).date()).days, 0)
+        due = date.fromisoformat(str(top["due_date"])[:10])
+        days = max((due - today_d).days, 0)
         top_block = {
             "name": top["name"],
             "due_date": str(top["due_date"]),

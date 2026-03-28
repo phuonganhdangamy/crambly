@@ -14,7 +14,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from db import ensure_demo_user, supabase_client
+from uuid import UUID
+
+from db import ensure_app_user, supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +97,7 @@ def _coerce_weak_by_course(raw: Any) -> dict[str, list[str]]:
 
 
 def apply_quiz_result(*, user_id: str, concept_id: str, correct: bool) -> dict[str, Any]:
-    ensure_demo_user()
+    ensure_app_user(UUID(user_id))
     sb = supabase_client()
     sb.table("quiz_results").insert(
         {
