@@ -2,7 +2,19 @@ import type { Session } from "@supabase/supabase-js";
 import { getSupabaseBrowser } from "./supabase";
 
 export function apiBase(): string {
-  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const url = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  if (typeof window !== "undefined") {
+    const h = window.location.hostname;
+    const onLocalHost = h === "localhost" || h === "127.0.0.1";
+    if (!onLocalHost && (url.includes("localhost") || url.includes("127.0.0.1"))) {
+      console.warn(
+        "[Crambly] NEXT_PUBLIC_API_URL is still localhost but the site is not. " +
+          "Set NEXT_PUBLIC_API_URL in Vercel (or your host) to your public FastAPI URL (https://...) and redeploy. " +
+          "On the API, set CORS_ORIGINS to this site’s origin (e.g. https://your-app.vercel.app).",
+      );
+    }
+  }
+  return url;
 }
 
 /** @deprecated Prefer sessionUserId() — kept for quick labels when session is unavailable */
